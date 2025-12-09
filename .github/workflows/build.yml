@@ -12,10 +12,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Setup MSYS2
+      if: runner.os == 'Windows'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          autoconf
+          automake
+          libtool
+          make
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-python
+          mingw-w64-x86_64-python-numpy
+          mingw-w64-x86_64-pcre2
+          mingw-w64-x86_64-xz
+          mingw-w64-x86_64-flac
 
     - name: Install build dependencies
       if: runner.os == 'Linux'
@@ -47,6 +65,7 @@ jobs:
         echo PREFIX=/opt/homebrew >> $GITHUB_ENV
 
     - name: Configure
+      if: runner.os != 'Windows'
       run: |
         autoreconf -i
         ./configure --disable-php --with-python=`which python3.12` \
@@ -55,8 +74,32 @@ jobs:
             --with-libFLAC=$PREFIX \
             --with-pcre=$PREFIX
 
+    - name: Configure (Windows)
+      if: runner.os == 'Windows'
+      shell: msys2 {0}
+      run: |
+        autoreconf -i
+        ./configure --disable-php \
+            --with-python=/mingw64/bin/python \
+            --with-ltdl=/mingw64 \
+            --with-liblzma=/mingw64 \
+            --with-libFLAC=/mingw64 \
+            --with-pcre=/mingw64
+
     - name: Build
+      if: runner.os != 'Windows'
+      run: make
+
+    - name: Build (Windows)
+      if: runner.os == 'Windows'
+      shell: msys2 {0}
       run: make
 
     - name: Run regression tests
+      if: runner.os != 'Windows'
+      run: make check
+
+    - name: Run regression tests (Windows)
+      if: runner.os == 'Windows'
+      shell: msys2 {0}
       run: make check
