@@ -164,9 +164,13 @@ typedef gd_off64_t off64_t;
 #endif
 
 #ifdef __MSVCRT__
-/* missing in sys/stat.h */
-#define S_ISREG(m)  (((m) & _S_IFMT) == _S_IFREG)
-#define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+/* missing in older sys/stat.h */
+# ifndef S_ISREG
+#  define S_ISREG(m)  (((m) & _S_IFMT) == _S_IFREG)
+# endif
+# ifndef S_ISDIR
+#  define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+# endif
 #endif
 
 /* the open() in the MSVCRT doesn't permit open()ing directories */
