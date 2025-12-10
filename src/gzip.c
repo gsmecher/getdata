@@ -21,6 +21,9 @@
 #include "internal.h"
 
 #ifdef HAVE_ZLIB_H
+# ifdef __MSVCRT__
+#  define Z_LARGE64
+# endif
 #include <zlib.h>
 #endif
 
