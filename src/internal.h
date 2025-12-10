@@ -608,12 +608,8 @@ double gd_strtod(const char *nptr, char **endptr);
 #  define fsync _commit
 #endif
 
-#ifndef __MINGW64_VERSION_MAJOR /* mingw-w64 has pthread.h*/
-#ifndef HAVE_PTHREAD_H
 #ifndef HAVE_GMTIME_R
 struct tm *gmtime_r(const time_t *timep, struct tm *result);
-#endif
-#endif
 #endif
 
 #ifndef HAVE_LSEEK64
