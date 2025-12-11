@@ -18,6 +18,8 @@
  * along with GetData; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
+
+#ifndef GD_TEST
 #define GD_TEST
 #include "internal.h"
 
@@ -41,7 +43,9 @@
 /* System call kludge for Win32 */
 #if defined __MSVCRT__ && defined MSYS_SHELL
 #include <process.h>
-int gd_system(const char* command)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+static int gd_system(const char* command)
 {
   int ret = -1;
 
@@ -53,6 +57,7 @@ int gd_system(const char* command)
 
   return ret;
 }
+#pragma GCC diagnostic pop
 #else
 #define gd_system system
 #endif
@@ -202,3 +207,5 @@ int gd_system(const char* command)
     (uint64_t)(n),(uint64_t)(v))
 #define CHECKXi(i,n,v) CHECKi(i,(n) != (v),n,"0x%" PRIX64,"0x%" PRIX64,\
     (uint64_t)(n),(uint64_t)(v))
+
+#endif
