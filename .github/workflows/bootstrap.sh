@@ -14,7 +14,7 @@ autoreconf -i
             --disable-idl \
             --disable-cplusplus \
             --disable-modules \
-            --with-python=`which python3` \
+            --with-python=`which python` \
             --with-pcre=$PREFIX \
             --with-ltdl=$PREFIX \
             --with-liblzma=$PREFIX \

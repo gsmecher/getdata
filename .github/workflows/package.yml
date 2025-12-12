@@ -113,14 +113,14 @@ jobs:
             make
           CIBW_BEFORE_ALL_WINDOWS: >
             C:\msys64\usr\bin\bash -lc "pacman -Sy --noconfirm autoconf automake libtool make mingw-w64-x86_64-gcc mingw-w64-x86_64-pcre mingw-w64-x86_64-pcre2 mingw-w64-x86_64-libltdl mingw-w64-x86_64-libsystre" &&
-            C:\msys64\msys2_shell.cmd -mingw64 -defterm -no-start -here -c "export CONFIG_SITE=/etc/config.site PREFIX=/mingw64 && autoreconf -i && ./configure --disable-php --disable-fortran --disable-perl --disable-matlab --disable-idl --disable-cplusplus --disable-python --enable-ansi-c --enable-modules --host=x86_64-w64-mingw32 --with-pcre=$PREFIX --with-ltdl=$PREFIX --with-liblzma=$PREFIX --with-libFLAC=$PREFIX && make"
+            C:\msys64\msys2_shell.cmd -mingw64 -defterm -no-start -here -c ".github/workflows/bootstrap-windows.sh --disable-python && make"
           CIBW_BEFORE_BUILD: >
-            python -m pip install "numpy>=2.0" &&
+            pip install "numpy>=2.0" &&
             .github/workflows/bootstrap.sh &&
             make -C bindings/python pyconstants.c
           CIBW_BEFORE_BUILD_WINDOWS: >
-            python -m pip install "numpy>=2.0" &&
-            C:\msys64\msys2_shell.cmd -mingw64 -defterm -no-start -here -c "cd bindings/python && echo '[build_ext]' > setup.cfg && echo 'compiler = mingw32' >> setup.cfg && cd ../.. && .github/workflows/bootstrap.sh --enable-ansi-c --enable-modules --with-python=$(which python) && make -C bindings/python pyconstants.c"
+            pip install "numpy>=2.0" &&
+            C:\msys64\msys2_shell.cmd -mingw64 -defterm -no-start -here -c "make -C bindings/python pyconstants.c"
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
             LD_LIBRARY_PATH=$PWD/src/.libs auditwheel repair -w {dest_dir} {wheel}
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
