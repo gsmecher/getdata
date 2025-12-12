@@ -9,7 +9,7 @@ cd $here/../../
 # Set up Windows-specific build configuration
 if [ ! -f "bindings/python/setup.cfg" ]; then
     echo "Setting up Windows build configuration..."
-    (cd bindings/python && echo '[build_ext]' > setup.cfg && echo 'compiler = mingw32' >> setup.cfg)
+    (cd bindings/python && echo '[build_ext]' > setup.cfg && echo 'compiler = mingw32' >> setup.cfg && echo 'define = _WIN64' >> setup.cfg)
 fi
 
 # Export default environment for mingw64 if not already set
