@@ -92,7 +92,7 @@ jobs:
       - name: Setup macOS environment
         if: runner.os == 'macOS'
         run: |
-          brew install automake libtool
+          brew install --quiet automake libtool bzip2 flac xz pcre libzzip
           echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.target }}" >> $GITHUB_ENV
           echo CPPFLAGS="`python3-config --includes`" >> $GITHUB_ENV
 
@@ -109,7 +109,6 @@ jobs:
             .github/workflows/bootstrap.sh --disable-python &&
             make
           CIBW_BEFORE_ALL_MACOS: >
-            brew install bzip2 flac xz pcre libzzip &&
             .github/workflows/bootstrap.sh --disable-python &&
             make
           CIBW_BEFORE_ALL_WINDOWS: >
