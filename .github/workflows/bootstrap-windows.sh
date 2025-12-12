@@ -27,6 +27,7 @@ autoreconf -i
             --enable-modules \
             --host=x86_64-w64-mingw32 \
             --with-python=python.exe \
+            ac_cv_header_numpy_arrayobject_h=yes \
             --with-pcre=$PREFIX \
             --with-ltdl=$PREFIX \
             --with-liblzma=$PREFIX \
