@@ -177,6 +177,10 @@ dnl calculate Python CPPFLAGS
 AC_MSG_CHECKING([Python CPPFLAGS])
 python_prefix=`$PYTHON -c "import sys; print (sys.prefix)"`
 python_exec_prefix=`$PYTHON -c "import sys; print (sys.exec_prefix)"`
+if test "x$this_is_msys" = "xyes"; then
+  python_prefix=`cygpath -m "$python_prefix"`
+  python_exec_prefix=`cygpath -m "$python_exec_prefix"`
+fi
 PYTHON_CPPFLAGS="-I${python_prefix}/include/python${PYTHON_LDVERSION}"
 if test "x${python_prefix}" != "x${python_exec_prefix}"; then
   PYTHON_CPPFLAGS="${PYTHON_CPPFLAGS} -I${python_exec_prefix}/include/python${PYTHON_LDVERSION}"

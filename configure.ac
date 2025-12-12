@@ -1012,7 +1012,11 @@ EOF
   fi
   if test "x$have_numpy" = "xyes"; then
     AC_MSG_CHECKING([NumPy CPPFLAGS])
-    NUMPY_CPPFLAGS=-I`$PYTHON -c "import numpy; print (numpy.get_include())"`
+    numpy_include=`$PYTHON -c "import numpy; print (numpy.get_include())"`
+    if test "x$this_is_msys" = "xyes"; then
+      numpy_include=`cygpath -m "$numpy_include"`
+    fi
+    NUMPY_CPPFLAGS=-I$numpy_include
     AC_MSG_RESULT([$NUMPY_CPPFLAGS])
 
     saved_cppflags=$CPPFLAGS

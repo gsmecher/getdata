@@ -15,35 +15,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macos-13 is an intel runner, macos-14 is apple silicon
-          - os: macos-13
-            python: '3.8'
-            build: 'cp38-macosx_x86_64'
-            target: '13.0'
-            prefix: /usr/local
-
-          - os: macos-13
+          # macos-15-intel for x86_64 (min macOS 15.0), macos-14 for ARM (min macOS 14.0)
+          - os: macos-15-intel
             python: '3.9'
             build: 'cp39-macosx_x86_64'
-            target: '13.0'
+            target: '15.0'
             prefix: /usr/local
 
-          - os: macos-13
+          - os: macos-15-intel
             python: '3.10'
             build: 'cp310-macosx_x86_64'
-            target: '13.0'
+            target: '15.0'
             prefix: /usr/local
 
-          - os: macos-13
+          - os: macos-15-intel
             python: '3.11'
             build: 'cp311-macosx_x86_64'
-            target: '13.0'
+            target: '15.0'
             prefix: /usr/local
 
-          - os: macos-13
+          - os: macos-15-intel
             python: '3.12'
             build: 'cp312-macosx_x86_64'
-            target: '13.0'
+            target: '15.0'
             prefix: /usr/local
 
           - os: macos-14
@@ -75,6 +69,11 @@ jobs:
             build: 'cp*-manylinux_x86_64'
             prefix: /usr
 
+          - os: windows-latest
+            python: '3.12'
+            build: 'cp*-win_amd64'
+            prefix: C:/vcpkg/installed/x64-windows
+
     steps:
       - name: Setup environment
         run: echo "PREFIX=${{ matrix.prefix }}" >> $GITHUB_ENV
@@ -93,7 +92,7 @@ jobs:
       - name: Setup macOS environment
         if: runner.os == 'macOS'
         run: |
-          brew install automake libtool
+          brew install --quiet automake libtool bzip2 flac xz pcre libzzip
           echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.target }}" >> $GITHUB_ENV
           echo CPPFLAGS="`python3-config --includes`" >> $GITHUB_ENV
 
@@ -104,24 +103,36 @@ jobs:
         run: python -m cibuildwheel --output-dir wheelhouse bindings/python
         env:
           CIBW_BUILD: ${{ matrix.build }}
-          CIBW_SKIP: cp36* cp37* cp313*
+          CIBW_SKIP: cp36* cp37* cp38*
           CIBW_BEFORE_ALL_LINUX: >
             yum install -y bzip2-devel flac-devel xz-devel pcre-devel zziplib-devel &&
             .github/workflows/bootstrap.sh --disable-python &&
             make
           CIBW_BEFORE_ALL_MACOS: >
-            brew install bzip2 flac xz pcre libzzip &&
             .github/workflows/bootstrap.sh --disable-python &&
             make
+          CIBW_BEFORE_ALL_WINDOWS: >
+            C:\msys64\usr\bin\bash -lc "pacman -Sy --noconfirm autoconf automake libtool make mingw-w64-x86_64-gcc mingw-w64-x86_64-pcre mingw-w64-x86_64-pcre2 mingw-w64-x86_64-libltdl mingw-w64-x86_64-libsystre" &&
+            C:\msys64\msys2_shell.cmd -mingw64 -defterm -no-start -here -c ".github/workflows/bootstrap-windows.sh --disable-python && make AM_LDFLAGS=\"-no-undefined\""
           CIBW_BEFORE_BUILD: >
-            python -m pip install oldest-supported-numpy &&
+            pip install "numpy>=2.0" &&
             .github/workflows/bootstrap.sh &&
             make -C bindings/python pyconstants.c
+          CIBW_BEFORE_BUILD_WINDOWS: >
+            pip install "numpy>=2.0" &&
+            C:\msys64\msys2_shell.cmd -mingw64 -defterm -no-start -here -c ".github/workflows/bootstrap-windows.sh && make -C bindings/python pyconstants.c"
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
             LD_LIBRARY_PATH=$PWD/src/.libs auditwheel repair -w {dest_dir} {wheel}
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
             DYLD_LIBRARY_PATH=$PWD/src/.libs delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
           CIBW_BUILD_VERBOSITY: 1
+          CIBW_ENVIRONMENT_WINDOWS: >
+            PATH="C:\\msys64\\mingw64\\bin;$PATH"
+            CC=gcc
+            CXX=g++
+            CFLAGS=-m64
+            LDFLAGS=-m64
+            MSYS2_PATH_TYPE=inherit
           CIBW_TEST_COMMAND: >
             cd {package}/test &&
             PYTHONPATH=`python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])'`:$PYTHONPATH make check

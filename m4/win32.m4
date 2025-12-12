@@ -34,7 +34,7 @@ AC_MSG_RESULT([$this_is_msys])
 if test "$this_is_msys" = "yes"; then
 AC_MSG_CHECKING([for the Win32 MSYS shell])
 msys_root=`mount | ${AWK} '/on \/ / {print [$]1}'`
-msys_shell1="$msys_root`echo $SHELL | ${SED} -e 's/\//\\\\/g'`.exe"
+msys_shell1=`echo "$msys_root$SHELL.exe" | ${SED} -e 's/\//\\\\/g'`
 msys_shell=`echo "$msys_shell1" | ${SED} -e 's/\\\\/\\\\\\\\/g'`
 AC_MSG_RESULT([$msys_shell1])
 AC_DEFINE_UNQUOTED([MSYS_SHELL], ["$msys_shell"],
