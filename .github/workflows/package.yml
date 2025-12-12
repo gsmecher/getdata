@@ -120,7 +120,7 @@ jobs:
             make -C bindings/python pyconstants.c
           CIBW_BEFORE_BUILD_WINDOWS: >
             pip install "numpy>=2.0" &&
-            C:\msys64\msys2_shell.cmd -mingw64 -defterm -no-start -here -c "make -C bindings/python pyconstants.c"
+            C:\msys64\msys2_shell.cmd -mingw64 -defterm -no-start -here -c ".github/workflows/bootstrap-windows.sh && make -C bindings/python pyconstants.c"
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
             LD_LIBRARY_PATH=$PWD/src/.libs auditwheel repair -w {dest_dir} {wheel}
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
