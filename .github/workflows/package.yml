@@ -113,7 +113,7 @@ jobs:
             make
           CIBW_BEFORE_ALL_WINDOWS: >
             C:\msys64\usr\bin\bash -lc "pacman -Sy --noconfirm autoconf automake libtool make mingw-w64-x86_64-gcc mingw-w64-x86_64-pcre mingw-w64-x86_64-pcre2 mingw-w64-x86_64-libltdl mingw-w64-x86_64-libsystre" &&
-            C:\msys64\msys2_shell.cmd -mingw64 -defterm -no-start -here -c ".github/workflows/bootstrap-windows.sh --disable-python && make"
+            C:\msys64\msys2_shell.cmd -mingw64 -defterm -no-start -here -c ".github/workflows/bootstrap-windows.sh --disable-python && make AM_LDFLAGS=\"-no-undefined\""
           CIBW_BEFORE_BUILD: >
             pip install "numpy>=2.0" &&
             .github/workflows/bootstrap.sh &&
