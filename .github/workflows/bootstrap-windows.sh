@@ -16,6 +16,11 @@ fi
 export CONFIG_SITE=${CONFIG_SITE:-/etc/config.site}
 export PREFIX=${PREFIX:-/mingw64}
 
+# Autotools only runs inside a MSYS2 environment, but cibuildwheel needs to use
+# a native venv to build the Python bindings. As a result, we end up with a confused
+# autotools that fails to find Numpy, and overrule it because there are several
+# right answers during wheel build anyways.
+
 autoreconf -i
 ./configure --disable-php \
             --disable-fortran \
