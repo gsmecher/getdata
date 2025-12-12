@@ -130,6 +130,8 @@ jobs:
             PATH="C:\\msys64\\mingw64\\bin;$PATH"
             CC=gcc
             CXX=g++
+            CFLAGS=-m64
+            LDFLAGS=-m64
             MSYS2_PATH_TYPE=inherit
           CIBW_TEST_COMMAND: >
             cd {package}/test &&
