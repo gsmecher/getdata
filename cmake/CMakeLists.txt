@@ -41,6 +41,11 @@ if(BUILD_PYTHON)
 endif()
 
 # Optional encoding libraries
+# On macOS, help CMake find Homebrew libraries
+if(APPLE AND DEFINED ENV{PREFIX})
+  list(APPEND CMAKE_PREFIX_PATH "$ENV{PREFIX}")
+endif()
+
 find_package(BZip2)
 find_package(ZLIB)
 find_package(LibLZMA)
