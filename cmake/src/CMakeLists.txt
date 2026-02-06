@@ -48,10 +48,11 @@ endif()
 list(REMOVE_ITEM gd_sources ${files_ignored})
 
 # Build shared library (parallel to autotools .so)
+# VERSION and SOVERSION are computed from libtool versioning in m4/version.m4
 add_library(getdata SHARED ${gd_sources} ${gd_headers} ${CMAKE_BINARY_DIR}/getdata.h)
 set_target_properties(getdata PROPERTIES
-  VERSION 11.0.0
-  SOVERSION 11
+  VERSION ${GETDATA_LIB_VERSION}
+  SOVERSION ${GETDATA_SO_VERSION}
   WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 

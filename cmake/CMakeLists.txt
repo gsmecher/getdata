@@ -15,13 +15,33 @@ foreach(line ${VERSION_M4})
     set(GETDATA_REVISION ${CMAKE_MATCH_1})
   elseif(line MATCHES "^m4_define\\(getdata_extra,[ ]*\\[([^]]*)\\]\\)")
     set(GETDATA_VERSION_SUFFIX "${CMAKE_MATCH_1}")
+  elseif(line MATCHES "^m4_define\\(getdata_iface_version,[ ]*([0-9]+)\\)")
+    set(GETDATA_IFACE_VERSION ${CMAKE_MATCH_1})
+  elseif(line MATCHES "^m4_define\\(getdata_impl_revision,[ ]*([0-9]+)\\)")
+    set(GETDATA_IMPL_REVISION ${CMAKE_MATCH_1})
+  elseif(line MATCHES "^m4_define\\(getdata_iface_age,[ ]*([0-9]+)\\)")
+    set(GETDATA_IFACE_AGE ${CMAKE_MATCH_1})
   endif()
 endforeach()
 if(NOT DEFINED GETDATA_MAJOR OR NOT DEFINED GETDATA_MINOR OR NOT DEFINED GETDATA_REVISION)
   message(FATAL_ERROR "Failed to parse version from ${GD_DIR}/m4/version.m4")
 endif()
+if(NOT DEFINED GETDATA_IFACE_VERSION OR NOT DEFINED GETDATA_IMPL_REVISION OR NOT DEFINED GETDATA_IFACE_AGE)
+  message(FATAL_ERROR "Failed to parse library interface version from ${GD_DIR}/m4/version.m4")
+endif()
+
+# Convert libtool versioning (CURRENT:REVISION:AGE) to CMake VERSION/SOVERSION
+# Libtool: -version-info CURRENT:REVISION:AGE
+# CMake SOVERSION = CURRENT - AGE
+# CMake VERSION = (CURRENT-AGE).AGE.REVISION
+math(EXPR GETDATA_SO_VERSION "${GETDATA_IFACE_VERSION} - ${GETDATA_IFACE_AGE}")
+set(GETDATA_LIB_VERSION "${GETDATA_SO_VERSION}.${GETDATA_IFACE_AGE}.${GETDATA_IMPL_REVISION}")
 
 project(getdata VERSION ${GETDATA_MAJOR}.${GETDATA_MINOR}.${GETDATA_REVISION})
+
+message(STATUS "GetData project version: ${PROJECT_VERSION}")
+message(STATUS "GetData library versioning: CURRENT=${GETDATA_IFACE_VERSION} REVISION=${GETDATA_IMPL_REVISION} AGE=${GETDATA_IFACE_AGE}")
+message(STATUS "GetData shared library: VERSION=${GETDATA_LIB_VERSION} SOVERSION=${GETDATA_SO_VERSION}")
 
 option(BUILD_PYTHON "Build Python bindings" ON)
 option(BUILD_CXX "Build C++ bindings" ON)
