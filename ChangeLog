@@ -1,3 +1,59 @@
+2026-02-06   Graeme Smecher <gsmecher@threespeedlogic.com>
+	* GetData-0.12.0 release.
+
+	* bindings/python/pyproject.toml: Added scikit-build-core
+	configuration for building Python wheels via CMake.
+
+	* CMakeLists.txt bindings/python/CMakeLists.txt: Modernized
+	CMake build system to support Python wheel generation and
+	improved cross-platform compatibility.
+
+	* .github/workflows/package.yml: Added CI/CD workflows for
+	building Python wheels on Linux, macOS, and Windows using
+	cibuildwheel and GitHub Actions.
+
+	* bindings/python: Updated to support NumPy 2.x.
+
+	* bindings/python/pyconstants.c: Fixed encoding_support
+	return codes.
+
+	* bindings/python/test/big_test.py
+	bindings/python/test/callback.py: Improved Python 3.x
+	compatibility, including proper exception handling, path
+	separators for cross-platform support, and regex handling
+	for builds without PCRE support.
+
+	* src/getdata.h.in src/common.c: Improved MSVC (Visual C++)
+	compatibility for native Windows builds.
+
+	* test/*.c: Fixed various test issues including C89
+	compatibility and preprocessor macro handling.
+
+	* CMakeLists.txt: Added proper handling of tests with exit
+	code 77 (autotools convention for skipped tests).
+
+	* configure.ac m4/compiler.m4: Updated Fortran support for
+	modern gfortran versions (>= 10) with -std=legacy and
+	-fallow-argument-mismatch flags.
+
+	* .github/workflows/build.yml: Added CI/CD workflows for
+	automated testing on Ubuntu, macOS, and Windows platforms.
+
+	* Fixed 64-bit time_t compatibility on 32-bit architectures.
+	Patch from Michael R. Crusoe.
+
+	* m4/python.m4: Fixed Python version detection for Python
+	3.10+. Patch from Steven Benton.
+
+	* bindings/perl/Makefile.am bindings/python/Makefile.am:
+	Fixed MacOS .dylib generation and post-install path
+	demangling.
+
+	* configure.ac: Bumped minimum automake version to 1.16.
+
+	* src/gd_trunc.c: Removed unused pathconf and fpathconf
+	calls.
+
 2021-11-04   D. V. Wiebe <getdata@ketiltrout.net>
 	* src/parse.c (_GD_ParseFieldSpec): If parsing a RAW field
 	fails, and it was stored as D->reference_field, NULLify
