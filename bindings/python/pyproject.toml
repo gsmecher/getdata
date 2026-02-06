@@ -1,16 +1,26 @@
 [build-system]
-requires = ["setuptools", "setuptools-scm", "wheel", "numpy>=2.0"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.5", "numpy>=2.0"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "pygetdata"
 dependencies = ["numpy>=1.7"]
 dynamic = ["version"]
 
-[tool.setuptools]
-script-files = ["../../util/dirfile2ascii", "../../util/checkdirfile"]
+[tool.scikit-build]
+cmake.source-dir = "../../cmake"
+cmake.build-type = "Release"
+cmake.args = ["-DBUILD_PYTHON=ON", "-DGD_TEST=OFF", "-DGD_UTIL=ON", "-DBUILD_CXX=OFF"]
+install.components = ["Runtime"]
+wheel.install-dir = "."
 
-[tool.setuptools_scm]
-version_scheme = "only-version"
-local_scheme = "no-local-version"
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "../../m4/version.m4"
+regex = '''
+m4_define\(getdata_major,\s*(?P<major>\d+)\)[\s\S]*
+m4_define\(getdata_minor,\s*(?P<minor>\d+)\)[\s\S]*
+m4_define\(getdata_revision,\s*(?P<micro>\d+)\)
+'''
+result = "{major}.{minor}.{micro}"
 

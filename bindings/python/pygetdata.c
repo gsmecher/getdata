@@ -922,7 +922,7 @@ static PyObject *gdpy_encoding_support(struct gdpy_fragment_t *self,
 
   n = gd_encoding_support(enc);
 
-  if (n == 0) {
+  if (n < 0) {
     Py_INCREF(Py_None);
     dreturn("%p", Py_None);
     return Py_None;
