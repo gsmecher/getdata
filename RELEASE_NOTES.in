@@ -4,13 +4,12 @@
         https://github.com/ketiltrout/getdata
 
 
-GetData-0.11.0 fixes Security Vulnerability CVE-2021-20204 found in previous
-versions of this library.  All users are encouraged to upgrade.  See:
+GetData-0.12.0 adds support for building Python wheels via CMake and
+scikit-build-core, enabling distribution through PyPI and improved
+cross-platform support for Windows, Linux, and macOS.
 
-  https://github.com/ketiltrout/getdata/security/advisories/GHSA-3m22-hpcj-m3pp
-
-This release also contains a few fixes which have accumulated over the years but
-were never previously released.
+This release also contains various build system improvements and fixes which
+have accumulated since 0.11.0.
 
 ---------------------------------------------------------------------------
 

@@ -1,3 +1,46 @@
+New in version 0.12.0:
+
+  Build System Changes:
+
+  * Added CMake build infrastructure for Python wheel generation via
+    scikit-build-core, enabling cross-platform builds and PyPI
+    distribution.
+
+  * Python wheels can now be built for Windows, Linux, and macOS using
+    GitHub Actions CI/CD workflows. All wheels include the full set of
+    encoding plugins (bzip2, gzip, lzma, flac, zzip) on every platform.
+
+  * Added wheel packaging test (test_wheel.py) to verify encoding plugin
+    availability in shipped wheels via cibuildwheel.
+
+  * CMake build system modernization: updated to support modern CMake
+    conventions, improved test harness integration, and better support
+    for downstream projects using find_package(Getdata).
+
+  Bindings Changes:
+
+  * PYTHON: Updated to support NumPy 2.x.
+
+  * PYTHON BUG FIX: Fixed encoding_support return codes.
+
+  * PYTHON BUG FIX: Improved Python 3.x compatibility in test suite,
+    including proper exception handling and path separators for
+    cross-platform support.
+
+  Miscellaneous:
+
+  * Improved MSVC (Visual C++) compatibility for native Windows builds,
+    including a fix for void pointer arithmetic in lzma.c (a GCC
+    extension not supported by MSVC).
+
+  * Updated build system to support gfortran with modern compiler flags
+    (-std=legacy, -fallow-argument-mismatch).
+
+  * Added CI/CD workflows for automated testing on Ubuntu, macOS, and
+    Windows platforms.
+
+|=========================================================================|
+
 New in version 0.11.0:
 
   Library Changes:
