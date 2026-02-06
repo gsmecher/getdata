@@ -23,23 +23,15 @@ target_include_directories(pygetdata PRIVATE
   ${Python3_NumPy_INCLUDE_DIRS}
 )
 
-# Link against shared library - wheel repair tools will bundle it
-target_link_libraries(pygetdata PRIVATE getdata)
+# For wheel builds, statically link to eliminate libgetdata.so from the wheel
+# Plugin libraries will still be dynamically linked and bundled by auditwheel/delocate
+if(SKBUILD)
+  target_link_libraries(pygetdata PRIVATE getdata_static)
+else()
+  target_link_libraries(pygetdata PRIVATE getdata)
+endif()
 
 # Remove 'lib' prefix on Unix-like systems
 set_target_properties(pygetdata PROPERTIES PREFIX "")
 
-# For wheel builds, set RPATH so repair tools can find the library
-if(SKBUILD)
-  if(APPLE)
-    set_target_properties(pygetdata PROPERTIES
-      INSTALL_RPATH "@loader_path/lib"
-      BUILD_WITH_INSTALL_RPATH FALSE)
-  else()
-    set_target_properties(pygetdata PROPERTIES
-      INSTALL_RPATH "$ORIGIN/lib"
-      BUILD_WITH_INSTALL_RPATH FALSE)
-  endif()
-endif()
-
-install(TARGETS pygetdata LIBRARY DESTINATION .)
+install(TARGETS pygetdata LIBRARY DESTINATION . COMPONENT Runtime)

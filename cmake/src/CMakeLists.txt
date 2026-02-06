@@ -81,20 +81,17 @@ macro(configure_getdata_target target)
   endif()
   if(FLAC_FOUND)
     target_include_directories(${target} PRIVATE ${FLAC_INCLUDE_DIRS})
-    target_link_directories(${target} PRIVATE ${FLAC_LIBRARY_DIRS})
-    target_link_libraries(${target} PRIVATE ${FLAC_LIBRARIES})
+    target_link_libraries(${target} PRIVATE ${FLAC_LINK_LIBRARIES})
     target_compile_definitions(${target} PRIVATE HAVE_LIBFLAC HAVE_FLAC_ALL_H USE_FLAC)
   endif()
   if(ZZIP_FOUND)
     target_include_directories(${target} PRIVATE ${ZZIP_INCLUDE_DIRS})
-    target_link_directories(${target} PRIVATE ${ZZIP_LIBRARY_DIRS})
-    target_link_libraries(${target} PRIVATE ${ZZIP_LIBRARIES})
+    target_link_libraries(${target} PRIVATE ${ZZIP_LINK_LIBRARIES})
     target_compile_definitions(${target} PRIVATE HAVE_LIBZZIP HAVE_ZZIP_LIB_H USE_ZZIP)
   endif()
   if(PCRE_FOUND)
     target_include_directories(${target} PRIVATE ${PCRE_INCLUDE_DIRS})
-    target_link_directories(${target} PRIVATE ${PCRE_LIBRARY_DIRS})
-    target_link_libraries(${target} PRIVATE ${PCRE_LIBRARIES})
+    target_link_libraries(${target} PRIVATE ${PCRE_LINK_LIBRARIES})
     target_compile_definitions(${target} PRIVATE HAVE_LIBPCRE HAVE_PCRE_H)
   endif()
 endmacro()
@@ -102,10 +99,21 @@ endmacro()
 configure_getdata_target(getdata)
 configure_getdata_target(getdata_static)
 
-install(FILES ${CMAKE_BINARY_DIR}/getdata.h DESTINATION include)
+# Link math library on Unix
+if(UNIX)
+  target_link_libraries(getdata PRIVATE m)
+  target_link_libraries(getdata_static PRIVATE m)
+endif()
 
-# Install both shared and static libraries
-install(TARGETS getdata getdata_static
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-  ARCHIVE DESTINATION lib)
+install(FILES ${CMAKE_BINARY_DIR}/getdata.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT Development)
+
+# Install static library (Development component, filtered out by wheel builds via pyproject.toml)
+install(TARGETS getdata_static
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Development)
+
+# Install shared library (skip for wheel builds where everything is statically linked)
+if(NOT SKBUILD)
+  install(TARGETS getdata
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Runtime
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT Runtime)
+endif()

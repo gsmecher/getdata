@@ -419,6 +419,7 @@ endif()
 
 configure_file(${GD_DIR}/src/getdata.h.in ${CMAKE_BINARY_DIR}/getdata.h @ONLY)
 
+include(GNUInstallDirs)
 include_directories(${GD_DIR}/src ${CMAKE_CURRENT_BINARY_DIR})
 
 if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
