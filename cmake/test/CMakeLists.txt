@@ -5,7 +5,7 @@ GD_FILES(gd test)
 add_definitions(-DGD_C89_API)
 
 if(BZIP2_FOUND)
-  add_definitions(-DTEST_BZIP -DUSE_BZIP2)
+  add_definitions(-DTEST_BZIP2 -DUSE_BZIP2)
 endif()
 if(ZLIB_FOUND)
   add_definitions(-DTEST_GZIP -DUSE_GZIP)
