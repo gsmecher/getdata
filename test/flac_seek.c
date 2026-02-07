@@ -37,8 +37,8 @@
 #define ENC_SUFFIX ".flac"
 #define ENC_NAME "flac"
 #define ENC_COMPRESS snprintf(command, 4096, \
-    "%s " ENDIANNESS " --silent --sample-rate=1 --channels=1 --bps=16 " \
-    "--sign=signed --delete-input-file %s >/dev/null 2>/dev/null", FLAC, \
-    data)
+    "\"%s\" " ENDIANNESS " --silent --sample-rate=1 --channels=1 --bps=16 " \
+    "--sign=signed --delete-input-file %s >%s 2>%s", FLAC, \
+    data, NULL_DEVICE, NULL_DEVICE)
 
 #include "enc_seek.c"

@@ -44,7 +44,7 @@ int main(void)
 
   /* compress */
   chdir(filedir);
-  snprintf(command, 4096, "%s raw data > /dev/null", ZIP);
+  snprintf(command, 4096, "\"%s\" raw data > %s", ZIP, NULL_DEVICE);
   if (gd_system(command))
     return 1;
   chdir("..");

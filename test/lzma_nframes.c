@@ -30,6 +30,6 @@
 
 #define ENC_SUFFIX ".lzma"
 #define ENC_COMPRESS \
-  snprintf(command, 4096, "%s -F lzma -f %s > /dev/null", XZ, data)
+  snprintf(command, 4096, "\"%s\" -F lzma -f %s > %s", XZ, data, NULL_DEVICE)
 
 #include "enc_nframes.c"

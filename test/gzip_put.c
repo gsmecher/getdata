@@ -69,7 +69,7 @@ int main(void)
 
 #ifdef USE_GZIP
   /* uncompress */
-  snprintf(command, 4096, "%s -f %s > /dev/null", GUNZIP, data);
+  snprintf(command, 4096, "\"%s\" -f %s > %s", GUNZIP, data, NULL_DEVICE);
   if (gd_system(command)) {
     r = 1;
   } else {

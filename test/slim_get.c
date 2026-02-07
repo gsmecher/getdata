@@ -46,7 +46,7 @@ int main(void)
   MAKEDATAFILE(data, uint16_t, i, 256);
 
   /* compress */
-  snprintf(command, 4096, "%s -k %s > /dev/null", SLIMDATA, data);
+  snprintf(command, 4096, "\"%s\" -k %s > %s", SLIMDATA, data, NULL_DEVICE);
   if (gd_system(command)) {
     perror("command");
     r = 1;

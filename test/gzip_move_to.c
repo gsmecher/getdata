@@ -75,7 +75,7 @@ int main(void)
 
 #ifdef USE_GZIP
   /* uncompress */
-  snprintf(command, 4096, "%s -f %s > /dev/null", GUNZIP, data_gz);
+  snprintf(command, 4096, "\"%s\" -f %s > %s", GUNZIP, data_gz, NULL_DEVICE);
   if (gd_system(command)) {
     fprintf(stderr, "command failed: %s\n", command);
     r = 1;

@@ -65,7 +65,7 @@ int main(void)
   CHECKI(stat_data, 0);
 
   /* uncompress */
-  snprintf(command, 4096, "%s --decompress -f %s > /dev/null", XZ, data_xz);
+  snprintf(command, 4096, "\"%s\" --decompress -f %s > %s", XZ, data_xz, NULL_DEVICE);
   if (gd_system(command)) {
     r = 1;
   } else {

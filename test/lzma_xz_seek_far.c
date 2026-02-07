@@ -39,7 +39,7 @@ int main(void)
   MAKEFORMATFILE(format, "data RAW UINT16 8\n");
   MAKEDATAFILE(data, uint16_t, i, 256);
 
-  snprintf(command, 4096, "%s -f %s > /dev/null", XZ, data);
+  snprintf(command, 4096, "\"%s\" -f %s > %s", XZ, data, NULL_DEVICE);
   if (gd_system(command))
     return 1;
 

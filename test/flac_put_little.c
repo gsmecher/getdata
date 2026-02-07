@@ -78,7 +78,7 @@ int main(void)
   if (stat_data)
     perror("stat");
 
-  snprintf(command, 4096, "%s --silent --decode --delete-input-file "
+  snprintf(command, 4096, "\"%s\" --silent --decode --delete-input-file "
       "--force-raw-format --sign=signed --endian=little %s --output-name=%s",
       FLAC, data_flac, data);
   if (gd_system(command)) {

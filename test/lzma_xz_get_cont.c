@@ -26,6 +26,6 @@
 
 #define ENC_SUFFIX ".xz"
 #define ENC_COMPRESS \
-  snprintf(command, 4096, "%s -f %s > /dev/null", XZ, data)
+  snprintf(command, 4096, "\"%s\" -f %s > %s", XZ, data, NULL_DEVICE)
 
 #include "enc_get_cont.c"
