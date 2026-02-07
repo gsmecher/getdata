@@ -408,7 +408,7 @@ ssize_t _GD_LzmaRead(struct gd_raw_file_ *file, void *data, gd_type_t data_type,
 
       lzd->offset += bytes_ready;
       bytes_remaining -= bytes_ready; 
-      data += bytes_ready;
+      data = (char *)data + bytes_ready;
       samples_read += samples_ready;
     }
     if (LZEOF(*lzd))
