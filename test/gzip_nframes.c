@@ -30,6 +30,6 @@
 
 #define ENC_SUFFIX ".gz"
 #define ENC_COMPRESS \
-  snprintf(command, 4096, "%s -f %s > /dev/null", GZIP, data)
+  snprintf(command, 4096, "\"%s\" -f %s > %s", GZIP, data, NULL_DEVICE)
 
 #include "enc_nframes.c"

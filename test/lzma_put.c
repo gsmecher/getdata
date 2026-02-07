@@ -41,7 +41,7 @@ int main(void)
   MAKEDATAFILE(data, uint8_t, i, 256);
 
   /* compress */
-  snprintf(command, 4096, "%s -F lzma -f %s > /dev/null", XZ, data);
+  snprintf(command, 4096, "\"%s\" -F lzma -f %s > %s", XZ, data, NULL_DEVICE);
   if (gd_system(command))
     return 1;
 

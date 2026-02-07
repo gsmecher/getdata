@@ -30,6 +30,6 @@
 
 #define ENC_SUFFIX ".bz2"
 #define ENC_COMPRESS \
-  snprintf(command, 4096, "%s -f %s > /dev/null", BZIP2, data)
+  snprintf(command, 4096, "\"%s\" -f %s > %s", BZIP2, data, NULL_DEVICE)
 
 #include "enc_nframes.c"

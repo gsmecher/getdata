@@ -43,11 +43,11 @@ int main(void)
   MAKEDATAFILE(data, uint16_t, i, 256);
 
   /* compress, twice */
-  snprintf(command, 4096, "%s -k %s > /dev/null", SLIMDATA, data);
+  snprintf(command, 4096, "\"%s\" -k %s > %s", SLIMDATA, data, NULL_DEVICE);
   if (gd_system(command))
     return 1;
   chdir(filedir);
-  snprintf(command, 4096, "%s raw data.slm > /dev/null", ZIP);
+  snprintf(command, 4096, "\"%s\" raw data.slm > %s", ZIP, NULL_DEVICE);
   if (gd_system(command))
     return 1;
   chdir("..");

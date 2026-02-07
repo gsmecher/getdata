@@ -67,9 +67,9 @@ int main(void)
 #endif
 
   /* uncompress */
-  snprintf(command, 4096, "%s --silent --decode --delete-input-file "
+  snprintf(command, 4096, "\"%s\" --silent --decode --delete-input-file "
       "--force-raw-format --sign=signed " ENDIANNESS " %s --output-name=%s "
-      ">/dev/null 2>/dev/null", FLAC, data_flac, data);
+      ">%s 2>%s", FLAC, data_flac, data, NULL_DEVICE, NULL_DEVICE);
   if (gd_system(command)) {
     r = 1;
   } else {

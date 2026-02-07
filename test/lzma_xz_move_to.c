@@ -75,7 +75,7 @@ int main(void)
 
 #ifdef USE_LZMA
   /* uncompress */
-  snprintf(command, 4096, "%s --decompress -f %s > /dev/null", XZ, data_xz);
+  snprintf(command, 4096, "\"%s\" --decompress -f %s > %s", XZ, data_xz, NULL_DEVICE);
   if (gd_system(command)) {
     fprintf(stderr, "command failed: %s\n", command);
     r = 1;

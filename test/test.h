@@ -73,6 +73,13 @@ int gd_system(const char* command)
 #define sleep(x) Sleep(1000 * (x))
 #endif
 
+/* null device for shell redirects */
+#ifdef _WIN32
+#define NULL_DEVICE "NUL"
+#else
+#define NULL_DEVICE "/dev/null"
+#endif
+
 #ifdef NO_LARGE_TESTS
 #define BIG_JUMP 10000
 #else
