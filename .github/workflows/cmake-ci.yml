@@ -19,7 +19,7 @@ jobs:
           - os: macos-latest
             deps: brew install --quiet cmake bzip2 flac xz pcre libzzip
           - os: windows-latest
-            deps: choco install cmake --no-progress
+            deps: vcpkg install bzip2 zlib liblzma libflac zziplib pcre --triplet x64-windows-static-md && choco install pkgconfiglite -y --no-progress
 
     steps:
       - name: Checkout
@@ -35,6 +35,13 @@ jobs:
 
       - name: Install system dependencies
         run: ${{ matrix.deps }}
+
+      - name: Setup Windows pkg-config
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "PKG_CONFIG_PATH=$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md/lib/pkgconfig" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md" >> $GITHUB_ENV
 
       - name: Configure CMake
         working-directory: cmake
