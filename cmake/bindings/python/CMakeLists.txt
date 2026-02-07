@@ -23,9 +23,10 @@ target_include_directories(pygetdata PRIVATE
   ${Python3_NumPy_INCLUDE_DIRS}
 )
 
-# For wheel builds, statically link to eliminate libgetdata.so from the wheel
-# Plugin libraries will still be dynamically linked and bundled by auditwheel/delocate
-if(SKBUILD)
+# For wheel builds, statically link to eliminate libgetdata.so from the wheel.
+# On Windows, link statically because WINDOWS_EXPORT_ALL_SYMBOLS does not
+# re-export symbols from static libraries (e.g. vcpkg) linked into a DLL.
+if(SKBUILD OR WIN32)
   target_link_libraries(pygetdata PRIVATE getdata_static)
 else()
   target_link_libraries(pygetdata PRIVATE getdata)

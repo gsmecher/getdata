@@ -121,7 +121,14 @@ foreach(_test ${gd_sources})
   get_filename_component(testname ${_test} NAME_WE)
   set(testname test_${testname})
   add_executable(${testname} ${_test})
-  target_link_libraries(${testname} getdata)
+  # On Windows, link statically: WINDOWS_EXPORT_ALL_SYMBOLS does not re-export
+  # symbols from static libraries (e.g. vcpkg) linked into a DLL, so tests
+  # linking the shared library would get unresolved externals for bzip2, flac, etc.
+  if(WIN32)
+    target_link_libraries(${testname} getdata_static)
+  else()
+    target_link_libraries(${testname} getdata)
+  endif()
   if(UNIX)
     target_link_libraries(${testname} m)
   endif()

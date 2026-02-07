@@ -71,29 +71,27 @@ jobs:
           CIBW_BEFORE_ALL_MACOS: >
             brew install --quiet cmake bzip2 flac xz pcre libzzip
           CIBW_BEFORE_ALL_WINDOWS: >
-            choco install cmake --no-progress
+            vcpkg install bzip2 zlib liblzma libflac zziplib pcre --triplet x64-windows-static-md &&
+            choco install pkgconfiglite -y --no-progress
           CIBW_ENVIRONMENT_MACOS: >
             PKG_CONFIG_PATH=${{ matrix.prefix }}/lib/pkgconfig
             PREFIX=${{ matrix.prefix }}
+          CIBW_ENVIRONMENT_WINDOWS: >
+            PKG_CONFIG_PATH="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md/lib/pkgconfig"
+            CMAKE_PREFIX_PATH="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md"
           CIBW_BEFORE_BUILD: >
             python -m pip install "scikit-build-core>=0.5" "numpy>=2.0"
           CIBW_BEFORE_BUILD_WINDOWS: >
             pip install delvewheel "scikit-build-core>=0.5" "numpy>=2.0"
           CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
-            delvewheel repair --extract-dir {dest_dir}\..\extract --add-path {dest_dir}\..\extract\bin -vv -w {dest_dir} {wheel}
+            delvewheel repair --add-path %VCPKG_INSTALLATION_ROOT%\installed\x64-windows-static-md\bin -vv -w {dest_dir} {wheel}
           CIBW_BUILD_VERBOSITY: 1
           CIBW_TEST_COMMAND_LINUX: >
-            python -c "import pygetdata; print(f'pygetdata version: {pygetdata.__version__}')" &&
-            cd {project}/bindings/python/test &&
-            python big_test.py
+            python {project}/bindings/python/test/test_wheel.py
           CIBW_TEST_COMMAND_MACOS: >
-            python -c "import pygetdata; print(f'pygetdata version: {pygetdata.__version__}')" &&
-            cd {project}/bindings/python/test &&
-            python big_test.py
+            python {project}/bindings/python/test/test_wheel.py
           CIBW_TEST_COMMAND_WINDOWS: >
-            python -c "import pygetdata; print(f'pygetdata version: {pygetdata.__version__}')" &&
-            cd /d {project}\bindings\python\test &&
-            python big_test.py
+            python {project}\bindings\python\test\test_wheel.py
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
