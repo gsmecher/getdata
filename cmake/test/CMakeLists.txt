@@ -44,7 +44,7 @@ set(tests_ignored
   zzslim_get zzslim_nframes zzslim_seek zzslim_seek_far
   )
 
-if(NOT BZIP2_FOUND OR NOT BUNZIP2 OR NOT BZIP2)
+if(NOT BZIP2_FOUND OR NOT BZIP2)
   list(APPEND tests_ignored
     bzip_add bzip_complex128 bzip_complex64 bzip_del bzip_enoent bzip_float32
     bzip_float64 bzip_get bzip_get_cont bzip_get_far bzip_get_get bzip_get_get2
@@ -54,7 +54,7 @@ if(NOT BZIP2_FOUND OR NOT BUNZIP2 OR NOT BZIP2)
     bzip_uint16 bzip_uint32 bzip_uint64 bzip_uint8)
 endif()
 
-if(NOT ZLIB_FOUND OR NOT GZIP OR NOT GUNZIP)
+if(NOT ZLIB_FOUND OR NOT GZIP)
   list(APPEND tests_ignored
     ascii_complex128 ascii_complex64 ascii_float32 ascii_float64
     gzip_add gzip_complex128 gzip_complex64 gzip_del gzip_enoent gzip_float32

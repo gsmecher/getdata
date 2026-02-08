@@ -99,10 +99,8 @@
 
 /* External tools (for tests) */
 #cmakedefine BZIP2 "@BZIP2@"
-#cmakedefine BUNZIP2 "@BUNZIP2@"
 #cmakedefine FLAC "@FLAC@"
 #cmakedefine GZIP "@GZIP@"
-#cmakedefine GUNZIP "@GUNZIP@"
 #cmakedefine UNZIP "@UNZIP@"
 #cmakedefine XZ "@XZ@"
 #cmakedefine ZIP "@ZIP@"

@@ -91,10 +91,8 @@ endif()
 
 # Find external compression tools for tests
 find_program(BZIP2 bzip2)
-find_program(BUNZIP2 bunzip2)
 find_program(FLAC flac)
 find_program(GZIP gzip)
-find_program(GUNZIP gunzip)
 find_program(UNZIP unzip)
 find_program(XZ xz)
 find_program(ZIP zip)
