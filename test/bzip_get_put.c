@@ -121,7 +121,7 @@ int main(void)
 
 #ifdef USE_BZIP2
   /* uncompress */
-  snprintf(command, 4096, "\"%s\" -f %s > %s", BUNZIP2, data_bz2, NULL_DEVICE);
+  snprintf(command, 4096, "\"%s\" -df %s > %s", BZIP2, data_bz2, NULL_DEVICE);
   if (gd_system(command)) {
     r = 1;
   } else {
