@@ -85,7 +85,7 @@ field has multiple data files with different, supported file extensions which
 could legitimately be associated with it, the encoding scheme discovered by
 GetData is not well defined.
 
-In addition to raw (unencoded) data, GetData supports nine other encoding
+In addition to raw (unencoded) data, GetData supports ten other encoding
 schemes:
 .I text
 encoding,
@@ -96,10 +96,12 @@ encoding,
 .I gzip
 encoding,
 .I lzma
-encoding, 
+encoding,
 .I sie
 (sample-index encoding),
 .I slim
+encoding,
+.I zstd
 encoding,
 .I zzip
 encoding, and
@@ -124,6 +126,14 @@ writing to the temporary file to be finished and then the file moved into place
 before the read occurs, which may take some time to do.  Encodings which perform
 out-of-place writes are:
 .IR bzip2 ", " flac ", " gzip ", and " lzma .
+.PP
+The
+.I zstd
+encoding does
+.B not
+perform out-of-place writes.  Instead, it appends independently compressed
+frames, allowing concurrent readers to see data up to the last fully-written
+frame.
 
 .SS BZip2 Encoding
 
@@ -249,6 +259,44 @@ operations are supported by the Text Encoding.  The file extension of the
 Text Encoding is
 .BR .txt .
 
+.SS Zstd Encoding
+
+The Zstd Encoding compresses raw binary files using the Zstandard compression
+algorithm.  GetData's Zstd Encoding scheme is implemented through
+.IR libzstd ,
+the reference implementation written by Yann Collet at Facebook (now Meta).
+All operations are supported by the Zstd Encoding.  Unlike other compression
+encodings in GetData, writing occurs in-place by appending independently
+compressed frames.  Each frame records its decompressed size in the standard
+zstd frame header.  On open, frame headers are scanned to build an in-memory
+index for random-access reads; no decompression is performed during this scan.
+.PP
+Because each completed frame is self-contained, concurrent readers will see
+data up to the last fully-written frame while a writer is appending new data.
+.PP
+The uncompressed frame size can be specified as an encoding parameter:
+.RS
+.IP
+.B /ENCODING zstd 4096
+.RE
+.PP
+sets the frame size to 4096 bytes.  The default is 131072 (128 KiB).  Smaller
+frame sizes reduce the latency before new data becomes visible to concurrent
+readers, at the cost of slightly reduced compression ratio and increased
+per-frame overhead (~18 bytes per frame).  The frame size only affects new
+writes; existing frames of any size are read correctly regardless of this
+setting.
+.PP
+When used with the
+.B /CHUNK
+directive (see
+.BR dirfile\-format (5)),
+backward writes (modifying previously-written data) only require rewriting the
+affected chunk file rather than the entire field.
+.PP
+The file extension of the Zstd Encoding is
+.BR .zst .
+
 .SS ZZip Encoding
 
 The ZZip Encoding reads compressed raw binary files using the DEFLATE algorithm
@@ -316,6 +364,7 @@ This manual page was written by D. V. Wiebe
 .BR flac (1),
 .BR gzip (1),
 .BR xz (1),
+.BR zstd (1),
 .BR zlib (3),
 .BR dirfile (5),
 .BR dirfile\-format (5)

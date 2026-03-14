@@ -1035,6 +1035,7 @@ GD_CHECK_ENCODING([gzip],[z],[gzopen],[zlib.h],[gzip],[gunzip],
 GD_CHECK_ENCODING([lzma],[lzma],[lzma_auto_decoder],[lzma.h],[xz],[],[])
 GD_CHECK_ENCODING([slim],[slim],[slimopen],[slimlib.h], [slimdata slim],
                   [unslim],[slimdopen slimdrawsize])
+GD_CHECK_ENCODING([zstd],[zstd],[ZSTD_compress],[zstd.h],[zstd],[unzstd],[])
 GD_CHECK_ENCODING([zzip],[zzip],[zzip_open],[zzip/lib.h],[zip],[unzip],[])
 
 dnl zzslim hackery -- there's no easy way to check whether slim supports zzip
