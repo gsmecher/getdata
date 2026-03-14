@@ -1659,6 +1659,7 @@ zstd_get_cont
 zstd_get_far
 zstd_get_get
 zstd_get_get2
+zstd_get_straddle
 zstd_int16
 zstd_int32
 zstd_int64
@@ -1668,11 +1669,14 @@ zstd_move_to
 zstd_nframes
 zstd_put
 zstd_put_back
+zstd_put_back_reopen
 zstd_put_endian
+zstd_put_gap
 zstd_put_get
 zstd_put_nframes
 zstd_put_off
 zstd_put_offs
+zstd_put_overwrite
 zstd_put_pad
 zstd_put_sub
 zstd_seek
