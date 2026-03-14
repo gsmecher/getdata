@@ -192,5 +192,3 @@ src/stamp-h2
 
 util/checkdirfile
 util/dirfile2ascii
-
-test/[a-z0-9_]*
