@@ -15,7 +15,7 @@
 .\" as part of this distribution.
 .\"
 .hw name-space
-.TH dirfile\-format 5 "19 January 2017" "Standards Version 10" "DATA FORMATS"
+.TH dirfile\-format 5 "15 March 2026" "Standards Version 11" "DATA FORMATS"
 .SH NAME
 dirfile\-format \(em the dirfile database format specification file
 .SH DESCRIPTION
@@ -187,7 +187,7 @@ present, plus any sub-fragments indicated by the
 .B /INCLUDE
 directive, but only if those sub-fragments don't have their own corresponding
 directive.  Directives which have fragment scope are:
-.BR /ENCODING ", " /ENDIAN ", " /FRAMEOFFSET ", and " /PROTECT .
+.BR /CHUNK ", " /ENCODING ", " /ENDIAN ", " /FRAMEOFFSET ", and " /PROTECT .
 Because of these scoping rules, different portions of the dirfile may have
 different encodings, endiannesses, frame offsets, or protection levels.
 
@@ -261,6 +261,51 @@ as well.
 .IP
 The /ALIAS directive has no scope: it is processed immediately.  It appeared in
 Standards Version 9.
+.TP
+.B /CHUNK
+The /CHUNK directive specifies a chunk size (in frames) for splitting
+.B RAW
+field data across multiple files.  Syntax is:
+.RS
+.IP
+.BI /CHUNK\~ <frames>
+.PP
+When a chunk size is specified, each
+.B RAW
+field's binary data is stored in a subdirectory named after the field, with
+one file per chunk named by its frame offset:
+.IB fieldname / N . ext
+where
+.I N
+is the frame offset of the chunk (relative to the fragment's
+.BR /FRAMEOFFSET )
+and
+.I ext
+is the encoding-specific file extension.  For example, with a chunk size of
+1000 and zstd encoding, the field "data" would be stored as
+.BR data/0.zst ,
+.BR data/1000.zst ,
+and so on.
+The chunk currently being written to (the cursor chunk) is stored as an
+unencoded raw file
+.RI ( data/0 )
+and compressed when the cursor advances to the next chunk.
+.PP
+A chunk size of 0 (or omitting the directive) disables chunking, and each field
+is stored as a single file.
+.PP
+The
+.FN gd_bof
+function returns the start of the first existing chunk, allowing callers to
+discover the available data range.
+Old chunks can be removed using
+.FN gd_expire
+to implement a rolling data buffer.
+.PP
+The /CHUNK directive has
+.IR "fragment scope" .
+It appeared in Standards Version 11.
+.RE
 .TP
 .B /ENCODING
 The /ENCODING directive specifies the encoding scheme used to encode binary
@@ -1772,7 +1817,15 @@ if the imaginary part were equal to +0.
 
 .SH HISTORY
 
-This document describes Versions 10 and earlier of the Dirfile Standards.
+This document describes Versions 11 and earlier of the Dirfile Standards.
+
+Version 11 of the Standards (March 2026) added the
+.B /CHUNK
+directive, the
+.B zstd
+encoding scheme, and the
+.FN gd_expire
+function.
 
 Version 10 of the Standards (January 2017) added the
 .BR INDIR ", " SARRAY ,

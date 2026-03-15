@@ -260,6 +260,7 @@ off64_t _GD_DoSeek(DIRFILE *D, gd_entry_t *E, const struct encoding_t *enc,
 
 int _GD_Seek(DIRFILE *D, gd_entry_t *E, off64_t offset, unsigned int mode)
 {
+  const struct gd_fragment_t *frag = &D->fragment[E->fragment_index];
   int i;
 
   dtrace("%p, %p, %" PRId64 ", 0x%X", D, E, (int64_t)offset, mode);
@@ -283,24 +284,41 @@ int _GD_Seek(DIRFILE *D, gd_entry_t *E, off64_t offset, unsigned int mode)
   switch (E->field_type) {
     case GD_RAW_ENTRY:
       /* open/create the file, if necessary */
-      if (_GD_InitRawIO(D, E, NULL, -1, NULL, GD_EF_SEEK, mode,
-            _GD_FileSwapBytes(D, E)))
-      {
-        break;
+      if (frag->chunk_size <= 0) {
+        if (_GD_InitRawIO(D, E, NULL, -1, NULL, GD_EF_SEEK, mode,
+              _GD_CheckByteSex(E->EN(raw,data_type), frag->byte_sex, 0, 0, NULL)))
+        {
+          break;
+        }
       }
 
       /* The requested offset is before the start of the file, so I guess
        * pretend we've repositioned it...
        */
-      if (E->EN(raw,spf) * D->fragment[E->fragment_index].frame_offset >
-          offset) {
+      if (E->EN(raw,spf) * frag->frame_offset > offset) {
         E->e->u.raw.file[0].pos = offset - E->EN(raw,spf) *
-          D->fragment[E->fragment_index].frame_offset;
+          frag->frame_offset;
         break;
       }
 
-      _GD_DoSeek(D, E, _GD_ef + E->e->u.raw.file[0].subenc, offset -
-          E->EN(raw,spf) * D->fragment[E->fragment_index].frame_offset, mode);
+      {
+        off64_t file_offset = offset - E->EN(raw,spf) * frag->frame_offset;
+
+        if (frag->chunk_size > 0) {
+          if (_GD_EnsureChunk(D, E, &file_offset, mode))
+            break;
+
+          /* Empty chunk (missing file on read): set position and stop */
+          if (E->e->u.raw.file[0].idata < 0 && (mode & GD_FILE_READ)) {
+            E->e->u.raw.file[0].pos = file_offset;
+            break;
+          }
+
+        }
+
+        _GD_DoSeek(D, E, _GD_ef + E->e->u.raw.file[0].subenc, file_offset,
+            mode);
+      }
       break;
     case GD_LINCOM_ENTRY:
       for (i = 0; i < E->EN(lincom,n_fields); ++i)

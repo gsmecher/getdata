@@ -392,16 +392,15 @@ int _GD_MissingFramework(int encoding, unsigned int funcs)
   return ret;
 }
 
-static int _GD_MoveOver(DIRFILE *restrict D, int fragment,
+static int _GD_MoveOver(DIRFILE *restrict D, int dirfd,
     struct gd_raw_file_ *restrict file)
 {
-  const int dirfd = D->fragment[fragment].dirfd;
 #ifdef HAVE_FCHMOD
   int fd;
   struct stat stat_buf;
   mode_t mode, tmode;
 #endif
-  dtrace("%p, %i, %p", D, fragment, file);
+  dtrace("%p, %i, %p", D, dirfd, file);
 
 #ifdef HAVE_FCHMOD
   if (gd_StatAt(D, dirfd, file[1].name, &stat_buf, 0))
@@ -422,8 +421,7 @@ static int _GD_MoveOver(DIRFILE *restrict D, int fragment,
       file[1].name = NULL;
     }
     errno = move_errno;
-    _GD_SetError(D, GD_E_UNCLEAN_DB, GD_E_UNCLEAN_CALL,
-        D->fragment[fragment].cname, 0, "gd_RenameAt");
+    _GD_SetError(D, GD_E_UNCLEAN_DB, GD_E_UNCLEAN_CALL, NULL, 0, "gd_RenameAt");
     D->flags |= GD_INVALID;
     dreturn("%i", -1);
     return -1;
@@ -446,6 +444,7 @@ static int _GD_MoveOver(DIRFILE *restrict D, int fragment,
  * fragment != E->fragment_index */
 int _GD_FiniRawIO(DIRFILE *D, const gd_entry_t *E, int fragment, int flags)
 {
+  const struct gd_fragment_t *frag = &D->fragment[fragment];
   const int clotemp = (flags & GD_FINIRAW_CLOTEMP) ? 1 : 0;
   const int old_mode = E->e->u.raw.file[0].mode;
   const int oop_write = ((_GD_ef[E->e->u.raw.file[0].subenc].flags & GD_EF_OOP)
@@ -521,8 +520,7 @@ int _GD_FiniRawIO(DIRFILE *D, const gd_entry_t *E, int fragment, int flags)
     if (flags & GD_FINIRAW_DISCARD) {
       /* Throw away the temporary file */
       if (E->e->u.raw.file[1].name != NULL &&
-          gd_UnlinkAt(D, D->fragment[fragment].dirfd, E->e->u.raw.file[1].name,
-            0))
+          gd_UnlinkAt(D, frag->dirfd, E->e->u.raw.file[1].name, 0))
       {
         if (D->error == GD_E_OK)
           _GD_SetEncIOError(D, GD_E_IO_UNLINK, E->e->u.raw.file + 1);
@@ -531,7 +529,7 @@ int _GD_FiniRawIO(DIRFILE *D, const gd_entry_t *E, int fragment, int flags)
       }
     } else {
       /* Move the old file over the new file */
-      if (_GD_MoveOver(D, fragment, E->e->u.raw.file)) {
+      if (_GD_MoveOver(D, frag->dirfd, E->e->u.raw.file)) {
         dreturn("%i", -1);
         return -1;
       }
@@ -592,22 +590,124 @@ ssize_t _GD_WriteOut(const gd_entry_t *E, const struct encoding_t *enc,
   return n_wrote;
 }
 
+/* Build a chunk filebase string: "fieldname/N" where N is the frame offset.
+ * The caller must free the returned string.  Returns NULL on allocation
+ * failure. */
+static char *_GD_ChunkFilebase(DIRFILE *D, const gd_entry_t *E,
+    off64_t chunk_frame)
+{
+  char *chunk_filebase;
+
+  /* 22 = "/" (1) + max PRId64 digits (20) + NUL (1) */
+  chunk_filebase = _GD_Malloc(D, strlen(E->e->u.raw.filebase) + 22);
+  if (chunk_filebase == NULL)
+    return NULL;
+  sprintf(chunk_filebase, "%s/%" PRId64, E->e->u.raw.filebase,
+      (int64_t)chunk_frame);
+  return chunk_filebase;
+}
+
+/* Ensure the chunk directory exists for a field.  Creates it if necessary.
+ * Returns 0 on success, non-zero on error. */
+static int _GD_EnsureChunkDir(DIRFILE *D, gd_entry_t *E)
+{
+  int dirfd = D->fragment[E->fragment_index].dirfd;
+  struct stat st;
+
+  if (gd_StatAt(D, dirfd, E->e->u.raw.filebase, &st, 0) == 0) {
+    if (S_ISDIR(st.st_mode))
+      return 0;  /* directory already exists */
+
+    /* A non-directory exists where we need the chunk directory.
+     * _GD_RechunkField cleans up old data files during chunk
+     * transitions, so this should not happen. */
+    _GD_SetError(D, GD_E_IO, GD_E_IO_OPEN, NULL, 0, NULL);
+    return 1;
+  }
+
+  if (gd_MkdirAt(D, dirfd, E->e->u.raw.filebase, 0777) && errno != EEXIST) {
+    _GD_SetError(D, GD_E_IO, GD_E_IO_OPEN, NULL, 0, NULL);
+    return 1;
+  }
+
+  return 0;
+}
+
 /* Open a raw file, if necessary; also check for required functions */
 int _GD_InitRawIO(DIRFILE *D, gd_entry_t *E, const char *filebase, int fragment,
     const struct encoding_t *enc, unsigned int funcs, unsigned int mode,
     int swap)
 {
+  const struct gd_fragment_t *frag;
   const int touch = mode & GD_FILE_TOUCH;
   int oop_write = 0;
 
-  dtrace("%p, %p, \"%s\", %i, %p, 0x%X, 0x%X, %i", D, E, filebase, fragment,
-      enc, funcs, mode, swap);
+  dtrace("%p, %p, \"%s\", %i, %p, 0x%X, 0x%X, %i", D, E, filebase,
+      fragment, enc, funcs, mode, swap);
+
+  frag = &D->fragment[E->fragment_index];
+
+  /* For chunked fields, individual chunk files are managed by
+   * _GD_EnsureChunk (called from _GD_Seek).  Chunk-unaware callers
+   * (filebase=NULL, fragment=-1) are handled here: touch creates the
+   * chunk directory, everything else is a no-op.  _GD_EnsureChunk
+   * itself passes a non-NULL filebase and falls through to the normal
+   * open path below. */
+  if (filebase == NULL && fragment == -1 && frag->chunk_size > 0)
+  {
+    if (touch) {
+      /* Create the chunk directory, then create an empty chunk-0 file so
+       * the field has a concrete presence on disk (consistent with the
+       * non-chunked touch behaviour which creates an empty flat file). */
+      char *chunk0_filebase;
+      struct gd_raw_file_ chunk0_file;
+      int chunk0_dirfd;
+
+      if (_GD_EnsureChunkDir(D, E)) {
+        dreturn("%i", 1);
+        return 1;
+      }
+
+      /* Only create chunk 0 if no chunks exist yet */
+      chunk0_filebase = _GD_ChunkFilebase(D, E, 0);
+      if (chunk0_filebase == NULL) {
+        dreturn("%i", 1);
+        return 1;
+      }
+
+      chunk0_dirfd = D->fragment[E->fragment_index].dirfd;
+
+      memset(&chunk0_file, 0, sizeof(chunk0_file));
+      chunk0_file.D = D;
+      chunk0_file.subenc = GD_ENC_RAW;
+      chunk0_file.idata = -1;
+
+      if (!(*_GD_ef[GD_ENC_RAW].name)(D, NULL, &chunk0_file,
+            chunk0_filebase, 0, 0))
+      {
+        struct stat st;
+        if (gd_StatAt(D, chunk0_dirfd, chunk0_file.name, &st, 0) != 0) {
+          /* File doesn't exist: create it empty */
+          if ((*_GD_ef[GD_ENC_RAW].open)(chunk0_dirfd, &chunk0_file,
+                E->EN(raw,data_type), 0, GD_FILE_WRITE) == 0)
+          {
+            (*_GD_ef[GD_ENC_RAW].close)(&chunk0_file);
+          }
+        } else {
+          free(chunk0_file.name);
+        }
+      }
+      free(chunk0_filebase);
+    }
+    dreturn("%i", 0);
+    return 0;
+  }
 
   if (mode & (GD_FILE_WRITE | GD_FILE_TOUCH))
     funcs |= GD_EF_WRITE;
 
-	/* If this is a temp file or we're just touching it, we don't register
-	 * it in the open field list, otherwise, try autoclosing first */
+  /* If this is a temp file or we're just touching it, we don't register
+   * it in the open field list, otherwise, try autoclosing first */
   if (!(mode & (GD_FILE_TEMP | GD_FILE_TOUCH))) {
     E->e->u.raw.fd_count = 1;
     if (_GD_AutoClose(D, 1)) {
@@ -669,15 +769,17 @@ int _GD_InitRawIO(DIRFILE *D, gd_entry_t *E, const char *filebase, int fragment,
   if (fragment == -1)
     fragment = E->fragment_index;
 
+  frag = &D->fragment[fragment];
+
   if (oop_write || mode & GD_FILE_TEMP) {
     /* create temporary file in file[1] */
-    if ((*enc->name)(D, (const char*)D->fragment[fragment].enc_data,
+    if ((*enc->name)(D, (const char*)frag->enc_data,
           E->e->u.raw.file + 1, filebase, 1, 0))
     {
       ; /* error already set */
       dreturn("%i", 1);
       return 1;
-    } else if ((*enc->open)(D->fragment[fragment].dirfd, E->e->u.raw.file + 1,
+    } else if ((*enc->open)(frag->dirfd, E->e->u.raw.file + 1,
           E->EN(raw,data_type), swap, GD_FILE_WRITE | GD_FILE_TEMP))
     {
       _GD_SetEncIOError(D, GD_E_IO_OPEN, E->e->u.raw.file + 1);
@@ -697,12 +799,12 @@ int _GD_InitRawIO(DIRFILE *D, gd_entry_t *E, const char *filebase, int fragment,
 
   /* open a regular file, if necessary */
   if (E->e->u.raw.file[0].idata < 0) {
-    if ((*enc->name)(D, (const char*)D->fragment[fragment].enc_data,
+    if ((*enc->name)(D, (const char*)frag->enc_data,
           E->e->u.raw.file, filebase, 0, 0))
     {
       dreturn("%i", 1);
       return 1;
-    } else if ((*enc->open)(D->fragment[fragment].dirfd, E->e->u.raw.file,
+    } else if ((*enc->open)(frag->dirfd, E->e->u.raw.file,
           E->EN(raw,data_type), swap, mode))
     {
       /* In oop_write mode, it doesn't matter if the old file doesn't exist */
@@ -851,6 +953,796 @@ int _GD_GenericName(DIRFILE *restrict D,
   return 0;
 }
 
+/* Create zero-filled raw chunk files for any missing chunks between the
+ * last known chunk and the target chunk_frame.  This ensures that reads
+ * across chunk boundaries return zeros for unwritten regions, matching the
+ * gap-fill behavior of non-chunked fields. */
+static void _GD_FillChunkGaps(DIRFILE *D, gd_entry_t *E, off64_t chunk_frame)
+{
+  int fragment = E->fragment_index;
+  int dirfd = D->fragment[fragment].dirfd;
+  off64_t chunk_size = D->fragment[fragment].chunk_size;
+  off64_t spf = E->EN(raw,spf);
+  gd_type_t data_type = E->EN(raw,data_type);
+  off64_t gap_start, gap_frame;
+  size_t chunk_bytes;
+  char *buf, *gap_filebase;
+  struct gd_raw_file_ gap_file;
+
+  /* Nothing to fill if this is the first chunk or immediately adjacent */
+  if (E->e->u.raw.last_chunk < 0 ||
+      chunk_frame <= E->e->u.raw.last_chunk + chunk_size)
+    return;
+
+  chunk_bytes = (size_t)(chunk_size * spf) * GD_SIZE(data_type);
+  buf = calloc(1, chunk_bytes);
+  if (buf == NULL)
+    return;
+
+  gap_start = E->e->u.raw.last_chunk + chunk_size;
+
+  for (gap_frame = gap_start; gap_frame < chunk_frame;
+      gap_frame += chunk_size)
+  {
+    gap_filebase = _GD_ChunkFilebase(D, E, gap_frame);
+    if (gap_filebase == NULL)
+      break;
+
+    memset(&gap_file, 0, sizeof(gap_file));
+    gap_file.D = D;
+    gap_file.subenc = GD_ENC_RAW;
+    gap_file.idata = -1;
+
+    if ((*_GD_ef[GD_ENC_RAW].name)(D, NULL, &gap_file, gap_filebase, 0, 0)) {
+      free(gap_filebase);
+      break;
+    }
+
+    if ((*_GD_ef[GD_ENC_RAW].open)(dirfd, &gap_file, data_type, 0,
+          GD_FILE_WRITE) == 0)
+    {
+      (*_GD_ef[GD_ENC_RAW].write)(&gap_file, buf, data_type,
+          (size_t)(chunk_size * spf));
+      (*_GD_ef[GD_ENC_RAW].close)(&gap_file);
+    }
+
+    free(gap_file.name);
+    free(gap_file.edata);
+    free(gap_filebase);
+  }
+
+  free(buf);
+}
+
+/* Probe whether a chunk file exists (raw cursor or encoded) and optionally
+ * return its size in samples.  Prefers raw over encoded -- a raw file is
+ * always authoritative (it may be the active cursor, or a survivor of a
+ * crash during finalization).
+ * Returns 1 if the chunk exists, 0 if not, -1 on error. */
+int _GD_ProbeChunk(DIRFILE *D, gd_entry_t *E, off64_t chunk_frame,
+    off64_t *size_out)
+{
+  int frag = E->fragment_index;
+  int subenc = E->e->u.raw.file[0].subenc;
+  int saved_errno;
+  struct gd_raw_file_ probe;
+  char *chunk_filebase;
+  off64_t chunk_nf;
+  int ret;
+
+  dtrace("%p, %p, %" PRId64 ", %p", D, E, (int64_t)chunk_frame, size_out);
+
+  chunk_filebase = _GD_ChunkFilebase(D, E, chunk_frame);
+  if (chunk_filebase == NULL) {
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  /* Try raw first (cursor or crash survivor) */
+  memset(&probe, 0, sizeof(probe));
+  probe.D = D;
+  probe.subenc = GD_ENC_RAW;
+  probe.idata = -1;
+
+  if ((*_GD_ef[GD_ENC_RAW].name)(D, NULL, &probe, chunk_filebase, 0, 0)) {
+    free(chunk_filebase);
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  errno = 0;
+  chunk_nf = (*_GD_ef[GD_ENC_RAW].size)(D->fragment[frag].dirfd, &probe,
+      E->EN(raw,data_type), 0);
+  saved_errno = errno;
+  free(probe.name);
+  free(probe.edata);
+
+  if (chunk_nf >= 0) {
+    if (size_out)
+      *size_out = chunk_nf;
+    free(chunk_filebase);
+    dreturn("%i", 1);
+    return 1;
+  }
+
+  if (saved_errno != ENOENT) {
+    free(chunk_filebase);
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  /* Raw not found -- try configured encoding (finalized chunk) */
+  if (subenc != GD_ENC_RAW) {
+    memset(&probe, 0, sizeof(probe));
+    probe.D = D;
+    probe.subenc = subenc;
+    probe.idata = -1;
+
+    if ((*_GD_ef[subenc].name)(D, (const char*)D->fragment[frag].enc_data,
+          &probe, chunk_filebase, 0, 0))
+    {
+      free(chunk_filebase);
+      dreturn("%i", -1);
+      return -1;
+    }
+
+    errno = 0;
+    chunk_nf = (*_GD_ef[subenc].size)(D->fragment[frag].dirfd, &probe,
+        E->EN(raw,data_type), _GD_FileSwapBytes(D, E));
+    saved_errno = errno;
+    free(probe.name);
+    free(probe.edata);
+
+    if (chunk_nf >= 0) {
+      if (size_out)
+        *size_out = chunk_nf;
+      free(chunk_filebase);
+      dreturn("%i", 1);
+      return 1;
+    }
+
+    ret = (saved_errno == ENOENT) ? 0 : -1;
+    free(chunk_filebase);
+    dreturn("%i", ret);
+    return ret;
+  }
+
+  free(chunk_filebase);
+  dreturn("%i", 0);
+  return 0;
+}
+
+/* Iterate over all chunk files for a chunked field, calling cb for each.
+ * The callback receives the chunk's frame offset and its filename (relative
+ * to the fragment directory).  Returns 0 on success, -1 on error, or the
+ * non-zero return value from the callback if it stopped iteration early. */
+int _GD_ForEachChunk(DIRFILE *D, gd_entry_t *E, gd_chunk_cb_t cb, void *data)
+{
+  int frag = E->fragment_index;
+  int dirfd = D->fragment[frag].dirfd;
+  const char *filebase = E->e->u.raw.filebase;
+  const char *ext = _GD_ef[E->e->u.raw.file[0].subenc].ext;
+  size_t ext_len;
+  DIR *dir;
+  struct dirent entry, *result;
+  char *chunkdir_path;
+  int ret = 0;
+  size_t n_chunks = 0, chunks_alloc = 0;
+  off64_t *chunk_frames = NULL;
+  char **chunk_paths = NULL;
+  size_t i;
+
+  dtrace("%p, %p, %p, %p", D, E, cb, data);
+
+  ext_len = ext ? strlen(ext) : 0;
+
+  /* Open the field's chunk directory.  Build a path relative to the
+   * fragment directory for opendir (portable across all platforms). */
+  chunkdir_path = _GD_MakeFullPathOnly(D, dirfd, filebase);
+  if (chunkdir_path == NULL) {
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  dir = opendir(chunkdir_path);
+  free(chunkdir_path);
+  if (dir == NULL) {
+    /* No directory means no chunks -- not an error */
+    if (errno == ENOENT) {
+      dreturn("%i", 0);
+      return 0;
+    }
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  /* Collect all chunk entries before closing the directory.  Callbacks may
+   * modify the directory (e.g. unlinking files), which is unsafe during
+   * FindFirst/FindNext iteration on Windows. */
+  while (_GD_ReadDir(dir, &entry, &result) == 0 && result != NULL) {
+    const char *name = result->d_name;
+    off64_t chunk_frame;
+    char *endp, *fullpath;
+
+    /* Skip . and .. */
+    if (name[0] == '.' && (name[1] == '\0' ||
+          (name[1] == '.' && name[2] == '\0')))
+      continue;
+
+    /* Parse frame number from filename: "N" or "N.ext" */
+    errno = 0;
+    chunk_frame = (off64_t)strtoll(name, &endp, 10);
+    if (errno != 0 || endp == name)
+      continue;
+
+    /* Accept both encoded (N.ext) and raw (N) */
+    if (*endp == '\0') {
+      /* Raw cursor / crash survivor */
+    } else if (ext_len > 0 && strcmp(endp, ext) == 0) {
+      /* Encoded finalized chunk */
+    } else {
+      continue;
+    }
+
+    /* Build full path relative to the fragment directory:
+     * "fieldname/filename" */
+    fullpath = malloc(strlen(filebase) + 1 + strlen(name) + 1);
+    if (fullpath == NULL) {
+      ret = -1;
+      break;
+    }
+    sprintf(fullpath, "%s/%s", filebase, name);
+
+    /* Grow arrays if needed */
+    if (n_chunks >= chunks_alloc) {
+      void *ptr;
+      chunks_alloc = chunks_alloc ? chunks_alloc * 2 : 16;
+      ptr = realloc(chunk_frames, chunks_alloc * sizeof(*chunk_frames));
+      if (ptr == NULL) {
+        free(fullpath);
+        ret = -1;
+        break;
+      }
+      chunk_frames = ptr;
+      ptr = realloc(chunk_paths, chunks_alloc * sizeof(*chunk_paths));
+      if (ptr == NULL) {
+        free(fullpath);
+        ret = -1;
+        break;
+      }
+      chunk_paths = ptr;
+    }
+
+    chunk_frames[n_chunks] = chunk_frame;
+    chunk_paths[n_chunks] = fullpath;
+    n_chunks++;
+  }
+
+  closedir(dir);
+
+  /* Now invoke callbacks outside the directory iteration */
+  if (ret == 0) {
+    for (i = 0; i < n_chunks; i++) {
+      ret = cb(D, E, chunk_frames[i], chunk_paths[i], data);
+      if (ret)
+        break;
+    }
+  }
+
+  for (i = 0; i < n_chunks; i++)
+    free(chunk_paths[i]);
+  free(chunk_paths);
+  free(chunk_frames);
+
+  dreturn("%i", ret);
+  return ret;
+}
+
+/* Callback for _GD_PopulateChunkCache: track min/max chunk frame */
+static int _GD_ChunkCacheCb(DIRFILE *D gd_unused_, gd_entry_t *E,
+    off64_t chunk_frame, const char *name gd_unused_, void *data gd_unused_)
+{
+  if (E->e->u.raw.first_chunk < 0 || chunk_frame < E->e->u.raw.first_chunk)
+    E->e->u.raw.first_chunk = chunk_frame;
+  if (chunk_frame > E->e->u.raw.last_chunk)
+    E->e->u.raw.last_chunk = chunk_frame;
+  return 0;
+}
+
+/* Return the total number of samples across all chunks for a chunked field.
+ * Populates and updates the chunk cache as needed.  Returns -1 on error or
+ * if no chunks exist. */
+off64_t _GD_ChunkedSampleCount(DIRFILE *D, gd_entry_t *E)
+{
+  off64_t chunk_size = D->fragment[E->fragment_index].chunk_size;
+  off64_t last, last_chunk_samples = 0;
+  off64_t full;
+
+  dtrace("%p, %p", D, E);
+
+  if (E->e->u.raw.last_chunk < 0)
+    _GD_PopulateChunkCache(D, E);
+
+  if (E->e->u.raw.last_chunk < 0) {
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  last = E->e->u.raw.last_chunk;
+
+  if (_GD_ProbeChunk(D, E, last, &last_chunk_samples) <= 0) {
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  /* Scan forward while the last known chunk is full */
+  full = chunk_size * E->EN(raw,spf);
+  while (last_chunk_samples >= full) {
+    off64_t next_size;
+    if (_GD_ProbeChunk(D, E, last + chunk_size, &next_size) <= 0)
+      break;
+    last += chunk_size;
+    last_chunk_samples = next_size;
+  }
+  E->e->u.raw.last_chunk = last;
+
+  dreturn("%" PRId64, (int64_t)(last * E->EN(raw,spf) + last_chunk_samples));
+  return last * E->EN(raw,spf) + last_chunk_samples;
+}
+
+/* Populate the chunk cache (first_chunk, last_chunk) for a chunked field. */
+void _GD_PopulateChunkCache(DIRFILE *D, gd_entry_t *E)
+{
+  dtrace("%p, %p", D, E);
+
+  E->e->u.raw.first_chunk = -1;
+  E->e->u.raw.last_chunk = -1;
+
+  _GD_ForEachChunk(D, E, _GD_ChunkCacheCb, NULL);
+
+  dreturnvoid();
+}
+
+/* Finalize a raw cursor chunk: read its contents, write them through the
+ * configured encoding, and delete the raw file.  The file must already be
+ * closed before calling this.  Returns 0 on success. */
+int _GD_FinalizeChunk(DIRFILE *D, gd_entry_t *E)
+{
+  int fragment = E->fragment_index;
+  int dirfd = D->fragment[fragment].dirfd;
+  gd_type_t data_type = E->EN(raw,data_type);
+  int swap = _GD_FileSwapBytes(D, E);
+  int oop, configured_subenc, i, ret;
+  unsigned long enc;
+  unsigned int open_mode;
+  off64_t raw_nsamples;
+  ssize_t nread, nwrote;
+  size_t buflen;
+  char *chunk_filebase, *raw_name, *final_name, *buf;
+  struct gd_raw_file_ raw_file, enc_file;
+
+  dtrace("%p, %p", D, E);
+
+  /* Find the configured encoding subenc.  If it's raw or unrecognized,
+   * there is nothing to compress. */
+  configured_subenc = -1;
+  enc = D->fragment[fragment].encoding;
+  for (i = 0; i < GD_N_SUBENCODINGS - 1; ++i)
+    if (_GD_ef[i].scheme == enc) {
+      configured_subenc = i;
+      break;
+    }
+  if (configured_subenc <= GD_ENC_RAW || configured_subenc >= GD_ENC_UNKNOWN) {
+    dreturn("%i", 0);
+    return 0;
+  }
+
+  chunk_filebase = _GD_ChunkFilebase(D, E, E->e->u.raw.active_chunk);
+  if (chunk_filebase == NULL) {
+    dreturn("%i", 1);
+    return 1;
+  }
+
+  /* Read the raw cursor file into memory */
+  memset(&raw_file, 0, sizeof(raw_file));
+  raw_file.D = D;
+  raw_file.subenc = GD_ENC_RAW;
+  raw_file.idata = -1;
+
+  ret = 1;
+  raw_name = NULL;
+  final_name = NULL;
+  buf = NULL;
+
+  if ((*_GD_ef[GD_ENC_RAW].name)(D, NULL, &raw_file, chunk_filebase, 0, 0))
+    goto cleanup;
+
+  raw_name = raw_file.name;
+  raw_nsamples = (*_GD_ef[GD_ENC_RAW].size)(dirfd, &raw_file, data_type, 0);
+  if (raw_nsamples <= 0) {
+    ret = 0;  /* empty or missing -- nothing to finalize */
+    goto cleanup;
+  }
+
+  buflen = (size_t)raw_nsamples * GD_SIZE(data_type);
+  buf = malloc(buflen);
+  if (buf == NULL)
+    goto cleanup;
+
+  if ((*_GD_ef[GD_ENC_RAW].open)(dirfd, &raw_file, data_type, 0,
+        GD_FILE_READ))
+    goto cleanup;
+
+  (*_GD_ef[GD_ENC_RAW].seek)(&raw_file, 0, data_type, GD_FILE_READ);
+  nread = (*_GD_ef[GD_ENC_RAW].read)(&raw_file, buf, data_type,
+      (size_t)raw_nsamples);
+  (*_GD_ef[GD_ENC_RAW].close)(&raw_file);
+
+  if (nread < raw_nsamples)
+    goto cleanup;
+
+  /* Write through the configured encoding.  OOP encodings write to a temp
+   * file that is renamed into place; non-OOP encodings write directly. */
+  oop = (_GD_ef[configured_subenc].flags & GD_EF_OOP) ? 1 : 0;
+
+  memset(&enc_file, 0, sizeof(enc_file));
+  enc_file.D = D;
+  enc_file.subenc = configured_subenc;
+  enc_file.idata = -1;
+
+  /* Generate the final encoded filename */
+  if ((*_GD_ef[configured_subenc].name)(D,
+        (const char*)D->fragment[fragment].enc_data,
+        &enc_file, chunk_filebase, 0, 0))
+    goto cleanup;
+
+  if (oop) {
+    /* Save the final name; generate a temp name for writing */
+    final_name = enc_file.name;
+    enc_file.name = NULL;
+    if ((*_GD_ef[configured_subenc].name)(D,
+          (const char*)D->fragment[fragment].enc_data,
+          &enc_file, chunk_filebase, 1, 0))
+      goto cleanup;
+  }
+
+  open_mode = oop ? GD_FILE_TEMP : GD_FILE_WRITE;
+  if ((*_GD_ef[configured_subenc].open)(dirfd, &enc_file, data_type, swap,
+        open_mode))
+    goto cleanup;
+
+  (*_GD_ef[configured_subenc].seek)(&enc_file, 0, data_type, GD_FILE_WRITE);
+  nwrote = (*_GD_ef[configured_subenc].write)(&enc_file, buf, data_type,
+      (size_t)nread);
+  (*_GD_ef[configured_subenc].close)(&enc_file);
+
+  if (nwrote < nread)
+    goto cleanup;
+
+  if (oop)
+    gd_RenameAt(D, dirfd, enc_file.name, dirfd, final_name);
+
+  /* Delete the raw cursor file */
+  gd_UnlinkAt(D, dirfd, raw_name, 0);
+
+  E->e->u.raw.cursor_is_raw = 0;
+  ret = 0;
+
+cleanup:
+  free(buf);
+  free(enc_file.name);
+  free(final_name);
+  free(raw_name);
+  free(chunk_filebase);
+
+  dreturn("%i", ret);
+  return ret;
+}
+
+/* Decompress an encoded chunk to a raw file so the OOP cursor can modify it.
+ * If no encoded chunk exists, this is a no-op.  Returns 0 on success. */
+static int _GD_UnencodeChunk(DIRFILE *D, gd_entry_t *E,
+    const char *chunk_filebase, int subenc)
+{
+  int fragment = E->fragment_index;
+  int dirfd = D->fragment[fragment].dirfd;
+  struct gd_raw_file_ enc_probe, raw_tmp;
+  off64_t enc_nsamples;
+  char *buf;
+  size_t buflen;
+  ssize_t nr;
+
+  dtrace("%p, %p, \"%s\", %i", D, E, chunk_filebase, subenc);
+
+  memset(&enc_probe, 0, sizeof(enc_probe));
+  enc_probe.D = D;
+  enc_probe.subenc = subenc;
+  enc_probe.idata = -1;
+
+  if ((*_GD_ef[subenc].name)(D, (const char*)D->fragment[fragment].enc_data,
+        &enc_probe, chunk_filebase, 0, 0))
+  {
+    dreturn("%i", 0);
+    return 0;  /* name failed -- no encoded chunk */
+  }
+
+  errno = 0;
+  enc_nsamples = (*_GD_ef[subenc].size)(dirfd, &enc_probe,
+      E->EN(raw,data_type), _GD_FileSwapBytes(D, E));
+
+  if (enc_nsamples <= 0) {
+    free(enc_probe.name);
+    free(enc_probe.edata);
+    dreturn("%i", 0);
+    return 0;  /* empty or missing */
+  }
+
+  buflen = (size_t)enc_nsamples * GD_SIZE(E->EN(raw,data_type));
+  buf = malloc(buflen);
+  if (buf == NULL) {
+    free(enc_probe.name);
+    free(enc_probe.edata);
+    dreturn("%i", 1);
+    return 1;
+  }
+
+  if ((*_GD_ef[subenc].open)(dirfd, &enc_probe, E->EN(raw,data_type),
+        _GD_FileSwapBytes(D, E), GD_FILE_READ))
+  {
+    free(buf);
+    free(enc_probe.name);
+    free(enc_probe.edata);
+    dreturn("%i", 1);
+    return 1;
+  }
+
+  (*_GD_ef[subenc].seek)(&enc_probe, 0, E->EN(raw,data_type), GD_FILE_READ);
+  nr = (*_GD_ef[subenc].read)(&enc_probe, buf, E->EN(raw,data_type),
+      (size_t)enc_nsamples);
+  (*_GD_ef[subenc].close)(&enc_probe);
+
+  if (nr <= 0) {
+    free(buf);
+    free(enc_probe.name);
+    free(enc_probe.edata);
+    dreturn("%i", 1);
+    return 1;
+  }
+
+  /* Write decompressed data to a raw file */
+  memset(&raw_tmp, 0, sizeof(raw_tmp));
+  raw_tmp.D = D;
+  raw_tmp.subenc = GD_ENC_RAW;
+  raw_tmp.idata = -1;
+
+  if ((*_GD_ef[GD_ENC_RAW].name)(D, NULL, &raw_tmp, chunk_filebase, 0, 0)) {
+    free(buf);
+    free(enc_probe.name);
+    free(enc_probe.edata);
+    dreturn("%i", 1);
+    return 1;
+  }
+
+  if ((*_GD_ef[GD_ENC_RAW].open)(dirfd, &raw_tmp, E->EN(raw,data_type), 0,
+        GD_FILE_WRITE))
+  {
+    free(buf);
+    free(raw_tmp.name);
+    free(enc_probe.name);
+    free(enc_probe.edata);
+    dreturn("%i", 1);
+    return 1;
+  }
+
+  (*_GD_ef[GD_ENC_RAW].seek)(&raw_tmp, 0, E->EN(raw,data_type), GD_FILE_WRITE);
+  (*_GD_ef[GD_ENC_RAW].write)(&raw_tmp, buf, E->EN(raw,data_type), (size_t)nr);
+  (*_GD_ef[GD_ENC_RAW].close)(&raw_tmp);
+  free(raw_tmp.name);
+  free(buf);
+
+  /* Delete the encoded file now that raw exists */
+  gd_UnlinkAt(D, dirfd, enc_probe.name, 0);
+  free(enc_probe.name);
+  free(enc_probe.edata);
+
+  dreturn("%i", 0);
+  return 0;
+}
+
+/* Ensure the correct chunk file is open for the given sample offset.
+ * If chunk_size is 0 (no chunking), this is a no-op.
+ *
+ * For writes with non-OOP encodings, chunks are opened directly through the
+ * configured encoding for in-place writes.  For OOP encodings, a raw cursor
+ * is used and finalized (compressed) when the cursor moves to a different
+ * chunk.
+ *
+ * For reads, finalized (encoded) chunks are opened via the configured
+ * encoding; raw cursor chunks (from OOP encodings or crash survivors) are
+ * opened as raw.
+ *
+ * On success, *s0 is adjusted to be chunk-local and returns 0.
+ * On error, returns non-zero with the error set on D. */
+int _GD_EnsureChunk(DIRFILE *D, gd_entry_t *E, off64_t *s0,
+    unsigned int mode)
+{
+  const struct gd_fragment_t *frag = &D->fragment[E->fragment_index];
+  off64_t chunk_size, spf, chunk_frame;
+  unsigned long enc;
+  int saved_subenc, i, have_raw;
+  struct stat st;
+  char *chunk_filebase;
+
+  dtrace("%p, %p, %" PRId64 ", 0x%X", D, E, (int64_t)*s0, mode);
+
+  chunk_size = frag->chunk_size;
+  if (chunk_size <= 0) {
+    dreturn("%i", 0);
+    return 0;
+  }
+
+  spf = E->EN(raw,spf);
+  chunk_frame = (*s0 / spf) / chunk_size * chunk_size;
+
+  /* Already have the right chunk open? */
+  if (E->e->u.raw.file[0].idata >= 0 &&
+      E->e->u.raw.active_chunk == chunk_frame)
+  {
+    *s0 -= chunk_frame * spf;
+    dreturn("%i", 0);
+    return 0;
+  }
+
+  /* Find the configured encoding's subenc index from the fragment.
+   * We can't use file[0].subenc because it may have been set to 0 (raw)
+   * for the cursor chunk. */
+  enc = frag->encoding;
+  saved_subenc = 0;
+  for (i = 0; i < GD_N_SUBENCODINGS - 1; ++i)
+    if (_GD_ef[i].scheme == enc) {
+      saved_subenc = i;
+      break;
+    }
+
+  /* Close and finalize current chunk if one is open */
+  if (E->e->u.raw.file[0].idata >= 0) {
+    if (_GD_FiniRawIO(D, E, E->fragment_index, GD_FINIRAW_KEEP)) {
+      dreturn("%i", 1);
+      return 1;
+    }
+
+    if (E->e->u.raw.cursor_is_raw) {
+      /* Restore configured subenc before finalizing */
+      E->e->u.raw.file[0].subenc = saved_subenc;
+      if (_GD_FinalizeChunk(D, E)) {
+        dreturn("%i", 1);
+        return 1;
+      }
+    }
+  }
+
+  /* Restore configured subenc (may have been set to 0 for cursor) */
+  E->e->u.raw.file[0].subenc = saved_subenc;
+  E->e->u.raw.cursor_is_raw = 0;
+
+  /* Free old filename so _GD_GenericName regenerates it for the new chunk */
+  free(E->e->u.raw.file[0].name);
+  E->e->u.raw.file[0].name = NULL;
+
+  chunk_filebase = _GD_ChunkFilebase(D, E, chunk_frame);
+  if (chunk_filebase == NULL) {
+    dreturn("%i", 1);
+    return 1;
+  }
+
+  if (mode & GD_FILE_WRITE) {
+    /* Ensure the chunk directory exists */
+    if (_GD_EnsureChunkDir(D, E)) {
+      free(chunk_filebase);
+      dreturn("%i", 1);
+      return 1;
+    }
+
+    /* Zero-fill any missing chunks between the last written chunk and
+     * the target, so reads across the gap return zeros. */
+    _GD_FillChunkGaps(D, E, chunk_frame);
+
+    if (_GD_ef[saved_subenc].flags & GD_EF_OOP) {
+      /* OOP encoding: use raw cursor, finalize on chunk switch.
+       * Decompress any existing finalized chunk to raw first. */
+      _GD_UnencodeChunk(D, E, chunk_filebase, saved_subenc);
+
+      E->e->u.raw.file[0].subenc = GD_ENC_RAW;
+      if (_GD_InitRawIO(D, E, chunk_filebase, -1, NULL, 0, mode,
+            _GD_FileSwapBytes(D, E)))
+      {
+        E->e->u.raw.file[0].subenc = saved_subenc;
+        free(chunk_filebase);
+        dreturn("%i", 1);
+        return 1;
+      }
+      E->e->u.raw.file[0].subenc = GD_ENC_RAW;  /* re-assert */
+      E->e->u.raw.cursor_is_raw = 1;
+    } else {
+      /* Non-OOP encoding: open directly, encoding handles in-place writes */
+      E->e->u.raw.file[0].subenc = saved_subenc;
+      if (_GD_InitRawIO(D, E, chunk_filebase, -1, NULL, 0, mode,
+            _GD_FileSwapBytes(D, E)))
+      {
+        free(chunk_filebase);
+        dreturn("%i", 1);
+        return 1;
+      }
+    }
+  } else {
+    /* Read path: prefer raw (cursor / crash survivor) over encoded
+     * (finalized).  Probe with stat first to avoid verbose open errors. */
+    have_raw = (gd_StatAt(D, frag->dirfd, chunk_filebase, &st, 0) == 0);
+
+    if (have_raw) {
+      E->e->u.raw.file[0].subenc = GD_ENC_RAW;
+      if (_GD_InitRawIO(D, E, chunk_filebase, -1, NULL, 0, mode,
+            _GD_FileSwapBytes(D, E)))
+      {
+        E->e->u.raw.file[0].subenc = saved_subenc;
+        free(chunk_filebase);
+        dreturn("%i", 1);
+        return 1;
+      }
+      E->e->u.raw.cursor_is_raw = 1;
+    } else {
+      /* Probe for the encoded file before trying _GD_InitRawIO, to avoid
+       * verbose error messages for the expected gap case. */
+      int have_enc = 0;
+      struct gd_raw_file_ enc_probe;
+
+      memset(&enc_probe, 0, sizeof(enc_probe));
+      enc_probe.subenc = saved_subenc;
+      enc_probe.idata = -1;
+
+      if (!_GD_MissingFramework(saved_subenc, GD_EF_NAME) &&
+          !(*_GD_ef[saved_subenc].name)(D, (const char*)frag->enc_data,
+            &enc_probe, chunk_filebase, 0, 0))
+      {
+        have_enc = (gd_StatAt(D, frag->dirfd, enc_probe.name, &st, 0) == 0);
+        free(enc_probe.name);
+      }
+
+      if (!have_enc) {
+        /* Neither raw nor encoded exists -- it's a gap */
+        free(chunk_filebase);
+        E->e->u.raw.active_chunk = chunk_frame;
+        *s0 -= chunk_frame * spf;
+        dreturn("%i", 0);
+        return 0;
+      }
+
+      /* Try configured encoding (finalized chunk) */
+      E->e->u.raw.file[0].subenc = saved_subenc;
+      if (_GD_InitRawIO(D, E, chunk_filebase, -1, NULL, 0, mode,
+            _GD_FileSwapBytes(D, E)))
+      {
+        free(chunk_filebase);
+        dreturn("%i", 1);
+        return 1;
+      }
+    }
+  }
+
+  free(chunk_filebase);
+  E->e->u.raw.active_chunk = chunk_frame;
+  *s0 -= chunk_frame * spf;
+
+  /* Update chunk cache */
+  if (E->e->u.raw.first_chunk < 0 || chunk_frame < E->e->u.raw.first_chunk)
+    E->e->u.raw.first_chunk = chunk_frame;
+  if (chunk_frame > E->e->u.raw.last_chunk)
+    E->e->u.raw.last_chunk = chunk_frame;
+
+  dreturn("%i", 0);
+  return 0;
+}
+
 /* This function assumes that the new encoding has no fragment->enc_data. */
 static void _GD_RecodeFragment(DIRFILE* D, unsigned long encoding, int fragment,
     int move)
@@ -874,7 +1766,8 @@ static void _GD_RecodeFragment(DIRFILE* D, unsigned long encoding, int fragment,
       {
         if (_GD_TransformField(D, D->entry[i], encoding,
               D->fragment[fragment].byte_sex,
-              D->fragment[fragment].frame_offset, fragment, NULL))
+              D->fragment[fragment].frame_offset,
+              D->fragment[fragment].chunk_size, fragment, NULL))
           break;
       }
 
@@ -1117,6 +2010,97 @@ int _GD_GenericMove(int olddirfd, struct gd_raw_file_ *restrict file,
 
   dreturn("%i", r);
   return r;
+}
+
+/* Callback for _GD_ChunkUnlink: unlink each chunk file */
+static int _GD_ChunkUnlinkCb(DIRFILE *D, gd_entry_t *E,
+    off64_t chunk_frame gd_unused_, const char *filename, void *data gd_unused_)
+{
+  int dirfd = D->fragment[E->fragment_index].dirfd;
+  return gd_UnlinkAt(D, dirfd, filename, 0) ? -1 : 0;
+}
+
+/* Unlink all chunk files for a chunked field, then remove the directory. */
+int _GD_ChunkUnlink(DIRFILE *D, gd_entry_t *E)
+{
+  int dirfd = D->fragment[E->fragment_index].dirfd;
+  char *path;
+  int ret;
+
+  dtrace("%p, %p", D, E);
+
+  ret = _GD_ForEachChunk(D, E, _GD_ChunkUnlinkCb, NULL);
+
+  /* Remove the now-empty chunk directory */
+  path = _GD_MakeFullPathOnly(D, dirfd, E->e->u.raw.filebase);
+  if (path != NULL) {
+    rmdir(path);
+    free(path);
+  }
+
+  E->e->u.raw.first_chunk = -1;
+  E->e->u.raw.last_chunk = -1;
+
+  dreturn("%i", ret);
+  return ret;
+}
+
+/* Move (rename) all chunk files for a chunked field by renaming the
+ * chunk directory itself. */
+int _GD_ChunkMove(DIRFILE *D, gd_entry_t *E, int newdirfd,
+    const char *new_filebase)
+{
+  int olddirfd = D->fragment[E->fragment_index].dirfd;
+  int ret;
+
+  dtrace("%p, %p, %i, \"%s\"", D, E, newdirfd, new_filebase);
+
+  ret = gd_RenameAt(D, olddirfd, E->e->u.raw.filebase, newdirfd,
+      new_filebase);
+
+  E->e->u.raw.first_chunk = -1;
+  E->e->u.raw.last_chunk = -1;
+
+  dreturn("%i", ret ? -1 : 0);
+  return ret ? -1 : 0;
+}
+
+struct chunk_expire_data {
+  off64_t threshold;  /* delete chunks with frame offset < threshold */
+};
+
+/* Callback for _GD_ChunkExpire: unlink chunks before threshold */
+static int _GD_ChunkExpireCb(DIRFILE *D, gd_entry_t *E,
+    off64_t chunk_frame, const char *filename, void *data)
+{
+  struct chunk_expire_data *t = (struct chunk_expire_data *)data;
+  int dirfd = D->fragment[E->fragment_index].dirfd;
+
+  if (chunk_frame < t->threshold)
+    return gd_UnlinkAt(D, dirfd, filename, 0) ? -1 : 0;
+
+  return 0;
+}
+
+/* Remove chunk files with frame offset < threshold.
+ * Returns 0 on success, -1 on error. */
+int _GD_ChunkExpire(DIRFILE *D, gd_entry_t *E, off64_t threshold)
+{
+  struct chunk_expire_data t;
+  int ret;
+
+  dtrace("%p, %p, %" PRId64, D, E, (int64_t)threshold);
+
+  t.threshold = threshold;
+
+  ret = _GD_ForEachChunk(D, E, _GD_ChunkExpireCb, &t);
+
+  /* Invalidate cache -- first_chunk may have changed */
+  E->e->u.raw.first_chunk = -1;
+  E->e->u.raw.last_chunk = -1;
+
+  dreturn("%i", ret);
+  return ret;
 }
 
 /* This function does nothing */

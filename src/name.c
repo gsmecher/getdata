@@ -1216,6 +1216,18 @@ static int _GD_Rename(DIRFILE *D, gd_entry_t *E, const char *new_name,
         GD_RETURN_ERROR(D);
       }
 
+      /* Move chunk files if chunked */
+      if (D->fragment[E->fragment_index].chunk_size > 0) {
+        if (_GD_ChunkMove(D, E,
+              D->fragment[E->fragment_index].dirfd, filebase))
+        {
+          _GD_SetEncIOError(D, GD_E_IO_RENAME, E->e->u.raw.file + 0);
+          _GD_CleanUpRename(rdat, 1);
+          free(filebase);
+          GD_RETURN_ERROR(D);
+        }
+      }
+
       if ((*_GD_ef[E->e->u.raw.file[0].subenc].move)(
             D->fragment[E->fragment_index].dirfd, E->e->u.raw.file,
             D->fragment[E->fragment_index].dirfd, temp.name))

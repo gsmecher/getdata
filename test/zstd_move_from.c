@@ -31,6 +31,6 @@
 #define ENC_SUFFIX ".zst"
 #define ENC_NAME "zstd"
 #define ENC_COMPRESS \
-  snprintf(command, 4096, "\"%s\" -f --rm %s > %s", ZSTD, data, NULL_DEVICE)
+  snprintf(command, 4096, "\"%s\" -qf --rm %s > %s", ZSTD, data, NULL_DEVICE)
 
 #include "enc_move_from.c"

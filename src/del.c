@@ -320,6 +320,10 @@ static void _GD_Delete(DIRFILE *restrict D, gd_entry_t *restrict E,
         return;
       }
 
+      /* Unlink chunk files if chunked, then the base file */
+      if (D->fragment[E->fragment_index].chunk_size > 0)
+        _GD_ChunkUnlink(D, E);
+
       if ((*_GD_ef[E->e->u.raw.file[0].subenc].unlink)(
             D->fragment[E->fragment_index].dirfd, E->e->u.raw.file))
       {
@@ -472,10 +476,99 @@ int gd_delete(DIRFILE *D, const char *field_code, unsigned int flags)
   E = _GD_FindField(D, field_code, strlen(field_code), D->entry, D->n_entries,
       0, &index);
 
-  if (E == NULL) 
+  if (E == NULL)
     _GD_SetError(D, GD_E_BAD_CODE, GD_E_CODE_MISSING, NULL, 0, field_code);
   else
     _GD_Delete(D, E, index, flags);
 
   GD_RETURN_ERROR(D);
 }
+
+static int _GD_ExpireFragment(DIRFILE *D, off64_t before_frame, int fragment)
+{
+  unsigned int j;
+  int ret = 0;
+  off64_t chunk_size, threshold;
+
+  dtrace("%p, %" PRId64 ", %i", D, (int64_t)before_frame, fragment);
+
+  chunk_size = D->fragment[fragment].chunk_size;
+  if (chunk_size <= 0)
+    GD_SET_RETURN_ERROR(D, GD_E_UNSUPPORTED, 0, NULL, 0, NULL);
+
+  if (D->fragment[fragment].protection & GD_PROTECT_DATA)
+    GD_SET_RETURN_ERROR(D, GD_E_PROTECTED, GD_E_PROTECTED_DATA, NULL, 0,
+        D->fragment[fragment].cname);
+
+  /* Convert API frame to chunk-relative frame (subtract FRAMEOFFSET) */
+  threshold = before_frame - D->fragment[fragment].frame_offset;
+  if (threshold < 0)
+    threshold = 0;
+
+  /* Round down to chunk boundary */
+  threshold = (threshold / chunk_size) * chunk_size;
+
+  for (j = 0; j < D->n_entries; ++j) {
+    gd_entry_t *E = D->entry[j];
+
+    if (E->field_type != GD_RAW_ENTRY)
+      continue;
+    if (E->fragment_index != fragment)
+      continue;
+
+    /* Close any open file for this field before deleting chunks */
+    if (E->e->u.raw.file[0].idata >= 0)
+      _GD_FiniRawIO(D, E, E->fragment_index, GD_FINIRAW_KEEP);
+
+    /* On Windows, open files can't be unlink()'d - so we need to make expiry
+     * best-effort, and stop when we hit the first failure in each field. We
+     * return GD_E_IO when this happens, but leave the field in a valid state
+     * and proceed to the next field. */
+    if (_GD_ChunkExpire(D, E, threshold)) {
+      ret = 1;
+      D->error = GD_E_OK;  /* clear so we can continue */
+    }
+  }
+
+  if (ret)
+    GD_SET_RETURN_ERROR(D, GD_E_IO, GD_E_IO_UNLINK, NULL, 0, NULL);
+
+  dreturn("%i", 0);
+  return 0;
+}
+
+int gd_expire64(DIRFILE *D, off64_t before_frame, int fragment)
+    gd_nothrow
+{
+  int i;
+
+  dtrace("%p, %" PRId64 ", %i", D, (int64_t)before_frame, fragment);
+
+  GD_RETURN_ERR_IF_INVALID(D);
+
+  if ((D->flags & GD_ACCMODE) == GD_RDONLY)
+    GD_SET_RETURN_ERROR(D, GD_E_ACCMODE, 0, NULL, 0, NULL);
+
+  if (fragment < GD_ALL_FRAGMENTS || fragment >= D->n_fragment)
+    GD_SET_RETURN_ERROR(D, GD_E_BAD_INDEX, 0, NULL, 0, NULL);
+
+  if (fragment == GD_ALL_FRAGMENTS) {
+    for (i = 0; i < D->n_fragment; ++i) {
+      _GD_ExpireFragment(D, before_frame, i);
+
+      if (D->error)
+        break;
+    }
+  } else
+    _GD_ExpireFragment(D, before_frame, fragment);
+
+  GD_RETURN_ERROR(D);
+}
+
+#if !(defined _FILE_OFFSET_BITS && _FILE_OFFSET_BITS == 64)
+/* 32(ish)-bit wrapper for the 64-bit version, when needed */
+int gd_expire(DIRFILE *D, off_t before_frame, int fragment)
+{
+  return gd_expire64(D, (off64_t)before_frame, fragment);
+}
+#endif

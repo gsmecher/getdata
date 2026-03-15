@@ -1028,6 +1028,15 @@ static void _GD_FlushFragment(DIRFILE* D, int i, int permissive)
         goto WRITE_ERR;
       }
 
+  /* Chunk size */
+  if (permissive || D->standards >= 11)
+    if (D->fragment[i].chunk_size > 0)
+      if (fprintf(stream, "/CHUNK %" PRId64 "\n",
+            (int64_t)D->fragment[i].chunk_size) < 0)
+      {
+        goto WRITE_ERR;
+      }
+
   /* Encoding */
   if (permissive || D->standards >= 6) {
     const char *encoding = NULL;

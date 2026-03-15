@@ -101,7 +101,9 @@ if(NOT ZSTD_FOUND OR NOT ZSTD)
     zstd_put_nframes zstd_put_off zstd_put_offs zstd_put_pad zstd_put_sub
     zstd_seek zstd_seek_far zstd_seek_put zstd_sync
     zstd_uint16 zstd_uint32 zstd_uint64 zstd_uint8
-    zstd_get_straddle zstd_put_gap zstd_put_overwrite zstd_put_back_reopen)
+    zstd_get_straddle zstd_put_gap zstd_put_overwrite zstd_put_back_reopen
+    zstd_chunk_backward zstd_chunk_boundary zstd_chunk_nframes
+    zstd_chunk_put_get zstd_chunk_stress)
 endif()
 
 if(NOT ZZIP_FOUND OR NOT ZIP OR NOT UNZIP)

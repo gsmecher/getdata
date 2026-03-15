@@ -50,7 +50,8 @@ static void _GD_ByteSwapFragment(DIRFILE* D, unsigned long byte_sex,
       {
         if (_GD_TransformField(D, D->entry[i],
               D->fragment[fragment].encoding, byte_sex,
-              D->fragment[fragment].frame_offset, fragment, NULL))
+              D->fragment[fragment].frame_offset,
+              D->fragment[fragment].chunk_size, fragment, NULL))
           break;
       }
 

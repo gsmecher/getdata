@@ -27,28 +27,52 @@ static void _GD_ResetRawIO(gd_entry_t *E)
   E->e->u.raw.file[0].name = NULL;
   E->e->u.raw.file[0].subenc = GD_ENC_UNKNOWN;
   E->e->u.raw.file[0].mode = 0;
+  E->e->u.raw.active_chunk = -1;
+  E->e->u.raw.first_chunk = -1;
+  E->e->u.raw.last_chunk = -1;
+  E->e->u.raw.cursor_is_raw = 0;
 }
 
-/* Remove all files created in tmp_dirfd for fieldbase, then rmdir
+/* Remove all files/dirs created in tmp_dirfd for fieldbase, then rmdir
  * tmp_path.  Used for rollback on error. */
-static void _GD_CleanupTempDir(DIRFILE *D, int tmp_dirfd,
-    const char *tmp_path, const char *fieldbase)
+static void _GD_CleanupTempDir(DIRFILE *D, gd_entry_t *E, int tmp_dirfd,
+    const char *tmp_path, const char *fieldbase, off64_t new_chunk_size)
 {
   struct gd_raw_file_ probe;
   int i;
 
-  /* Remove encoded flat file for each known subencoding */
-  memset(&probe, 0, sizeof(probe));
-  probe.D = D;
-  probe.idata = -1;
-  for (i = 0; _GD_ef[i].scheme != GD_ENC_UNSUPPORTED; i++) {
-    if (_GD_MissingFramework(i, GD_EF_NAME | GD_EF_UNLINK))
-      continue;
-    probe.subenc = i;
-    if (!(*_GD_ef[i].name)(D, NULL, &probe, fieldbase, 0, 0)) {
-      gd_UnlinkAt(D, tmp_dirfd, probe.name, 0);
-      free(probe.name);
-      probe.name = NULL;
+  if (new_chunk_size > 0) {
+    /* Remove the chunk directory and its contents */
+    char *chunkdir = _GD_MakeFullPath(D, tmp_dirfd, fieldbase, 0);
+    if (chunkdir) {
+      /* Walk and unlink files inside it */
+      struct stat st;
+      if (gd_StatAt(D, tmp_dirfd, fieldbase, &st, 0) == 0 &&
+          S_ISDIR(st.st_mode))
+      {
+        /* Reuse _GD_ForEachChunk-style: just use a saved tmp_dirfd to unlink */
+        /* Simpler: repoint E's fragment dirfd and use _GD_ChunkUnlink */
+        int saved_dirfd = D->fragment[E->fragment_index].dirfd;
+        D->fragment[E->fragment_index].dirfd = tmp_dirfd;
+        _GD_ChunkUnlink(D, E);
+        D->fragment[E->fragment_index].dirfd = saved_dirfd;
+      }
+      free(chunkdir);
+    }
+  } else {
+    /* Remove encoded flat file for each known subencoding */
+    memset(&probe, 0, sizeof(probe));
+    probe.D = D;
+    probe.idata = -1;
+    for (i = 0; _GD_ef[i].scheme != GD_ENC_UNSUPPORTED; i++) {
+      if (_GD_MissingFramework(i, GD_EF_NAME | GD_EF_UNLINK))
+        continue;
+      probe.subenc = i;
+      if (!(*_GD_ef[i].name)(D, NULL, &probe, fieldbase, 0, 0)) {
+        gd_UnlinkAt(D, tmp_dirfd, probe.name, 0);
+        free(probe.name);
+        probe.name = NULL;
+      }
     }
   }
 
@@ -57,8 +81,9 @@ static void _GD_CleanupTempDir(DIRFILE *D, int tmp_dirfd,
 }
 
 /* _GD_TransformField: stream a RAW field's data from its current layout to a
- * new layout (encoding, byte_sex, frame_offset).  Reads via the normal read
- * path and writes to a temp directory, then commits on success.
+ * new layout (encoding, byte_sex, frame_offset, chunk_size).  Reads via the
+ * normal read path (chunk-aware) and writes to a temp directory using the
+ * fragment override mechanism, then atomically commits on success.
  *
  * new_fragment identifies the destination fragment (for dirfd and protection).
  * new_filebase is the destination filebase; NULL means keep the existing one.
@@ -66,7 +91,7 @@ static void _GD_CleanupTempDir(DIRFILE *D, int tmp_dirfd,
  * Returns 0 on success, -1 on failure (D->error set). */
 int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
     unsigned long new_byte_sex, off64_t new_frame_offset,
-    int new_fragment, const char *new_filebase)
+    off64_t new_chunk_size, int new_fragment, const char *new_filebase)
 {
   int frag = E->fragment_index;
   int src_dirfd = D->fragment[frag].dirfd;
@@ -87,9 +112,9 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
   struct gd_raw_file_ target_file;
   struct gd_raw_file_ new_file;
 
-  dtrace("%p, %p, %lu, %lu, %" PRId64 ", %i, \"%s\"",
+  dtrace("%p, %p, %lu, %lu, %" PRId64 ", %" PRId64 ", %i, \"%s\"",
       D, E, new_encoding, new_byte_sex, (int64_t)new_frame_offset,
-      new_fragment, new_filebase);
+      (int64_t)new_chunk_size, new_fragment, new_filebase);
 
   if (new_filebase == NULL)
     new_filebase = E->e->u.raw.filebase;
@@ -149,6 +174,7 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
   if (new_frame_offset == D->fragment[frag].frame_offset &&
       new_encoding == D->fragment[frag].encoding &&
       new_byte_sex == D->fragment[frag].byte_sex &&
+      new_chunk_size == D->fragment[frag].chunk_size &&
       strcmp(new_filebase, E->e->u.raw.filebase) == 0 &&
       dst_dirfd == src_dirfd)
   {
@@ -233,8 +259,8 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
   target_file.idata = -1;
   target_open = 0;
 
-  /* Stream: read via normal path (handles encoding resolution), write to
-   * tmp_dirfd via local file handle and direct encoding calls. */
+  /* Stream: read via normal path (handles chunks, encoding resolution),
+   * write to tmp_dirfd via local file handle and direct encoding calls. */
   for (pos = bof; pos < eof_samples; pos += (off64_t)nread) {
     n = (size_t)(eof_samples - pos);
     if (n > buf_samples)
@@ -285,8 +311,9 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
 
   free(buf);
 
-  /* For OOP targets, encode the raw file we just wrote: read raw, write
-   * through encoder, rename for OOP, delete raw. */
+  /* For OOP targets, encode the raw file we just wrote.  This follows
+   * the same pattern as _GD_FinalizeChunk (encoding.c:1312): read raw,
+   * write through encoder, rename for OOP, delete raw. */
   if (!D->error && oop && target_open && subencoding != GD_ENC_RAW) {
     struct gd_raw_file_ enc_file;
     char *final_name;
@@ -369,48 +396,63 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
 
   if (D->error) {
     E->e->u.raw.file[0].subenc = saved_subenc;
-    _GD_CleanupTempDir(D, tmp_dirfd, tmp_path, new_filebase);
+    _GD_CleanupTempDir(D, E, tmp_dirfd, tmp_path, new_filebase, new_chunk_size);
     free(tmp_path);
     dreturn("%i", -1);
     return -1;
   }
 
   /* Commit: delete old data */
-  memset(&new_file, 0, sizeof(new_file));
-  new_file.D = D;
-  new_file.idata = -1;
-  new_file.subenc = saved_subenc;
-  if (!(*_GD_ef[saved_subenc].name)(D,
-        (const char *)D->fragment[frag].enc_data, &new_file,
-        E->e->u.raw.filebase, 0, 0))
-  {
-    (*_GD_ef[saved_subenc].unlink)(src_dirfd, &new_file);
-    free(new_file.name);
+  if (D->fragment[frag].chunk_size > 0) {
+    _GD_ChunkUnlink(D, E);
+  } else {
+    memset(&new_file, 0, sizeof(new_file));
+    new_file.D = D;
+    new_file.idata = -1;
+    new_file.subenc = saved_subenc;
+    if (!(*_GD_ef[saved_subenc].name)(D,
+          (const char *)D->fragment[frag].enc_data, &new_file,
+          E->e->u.raw.filebase, 0, 0))
+    {
+      (*_GD_ef[saved_subenc].unlink)(src_dirfd, &new_file);
+      free(new_file.name);
+    }
   }
 
   /* Move new data from temp dir to destination */
-  memset(&new_file, 0, sizeof(new_file));
-  new_file.D = D;
-  new_file.idata = -1;
-  new_file.subenc = subencoding;
-  if ((*_GD_ef[subencoding].name)(D, NULL, &new_file, new_filebase, 0, 0))
-  {
-    _GD_ReleaseDir(D, tmp_dirfd);
-    free(tmp_path);
-    _GD_ResetRawIO(E);
-    dreturn("%i", -1);
-    return -1;
-  }
-  if (gd_RenameAt(D, tmp_dirfd, new_file.name, dst_dirfd, new_file.name)) {
-    _GD_SetError(D, GD_E_IO, GD_E_IO_RENAME, new_file.name, 0, NULL);
+  if (new_chunk_size > 0) {
+    if (gd_RenameAt(D, tmp_dirfd, new_filebase, dst_dirfd, new_filebase)) {
+      _GD_SetError(D, GD_E_IO, GD_E_IO_RENAME, new_filebase, 0, NULL);
+      _GD_ReleaseDir(D, tmp_dirfd);
+      free(tmp_path);
+      _GD_ResetRawIO(E);
+      dreturn("%i", -1);
+      return -1;
+    }
+  } else {
+    memset(&new_file, 0, sizeof(new_file));
+    new_file.D = D;
+    new_file.idata = -1;
+    new_file.subenc = subencoding;
+    if ((*_GD_ef[subencoding].name)(D, NULL, &new_file, new_filebase, 0, 0))
+    {
+      _GD_ReleaseDir(D, tmp_dirfd);
+      free(tmp_path);
+      _GD_ResetRawIO(E);
+      dreturn("%i", -1);
+      return -1;
+    }
+    if (gd_RenameAt(D, tmp_dirfd, new_file.name, dst_dirfd, new_file.name)) {
+      _GD_SetError(D, GD_E_IO, GD_E_IO_RENAME, new_file.name, 0, NULL);
+      free(new_file.name);
+      _GD_ReleaseDir(D, tmp_dirfd);
+      free(tmp_path);
+      _GD_ResetRawIO(E);
+      dreturn("%i", -1);
+      return -1;
+    }
     free(new_file.name);
-    _GD_ReleaseDir(D, tmp_dirfd);
-    free(tmp_path);
-    _GD_ResetRawIO(E);
-    dreturn("%i", -1);
-    return -1;
   }
-  free(new_file.name);
 
   _GD_ReleaseDir(D, tmp_dirfd);
   rmdir(tmp_path);
@@ -472,9 +514,9 @@ static int _GD_Move(DIRFILE *D, gd_entry_t *E, int new_fragment, unsigned flags)
   /* Compose the field's new name */
 
   /* remove the old affixes */
-  new_filebase = _GD_StripCode(D, E->fragment_index, E->field, GD_CO_NSALL
+  new_filebase = _GD_StripCode(D, E->fragment_index, E->field, GD_CO_NSALL 
       | GD_CO_ASSERT);
-
+  
   if (!new_filebase) /* Alloc error */
     GD_RETURN_ERROR(D);
 
@@ -515,6 +557,7 @@ static int _GD_Move(DIRFILE *D, gd_entry_t *E, int new_fragment, unsigned flags)
     if (_GD_TransformField(D, E, D->fragment[new_fragment].encoding,
           D->fragment[new_fragment].byte_sex,
           D->fragment[new_fragment].frame_offset,
+          D->fragment[new_fragment].chunk_size,
           new_fragment, new_filebase))
     {
       _GD_CleanUpRename(rdat, 1);
@@ -565,7 +608,7 @@ int gd_move(DIRFILE *D, const char *field_code, int new_fragment,
     GD_SET_RETURN_ERROR(D, GD_E_BAD_FIELD_TYPE, GD_E_FIELD_BAD, NULL, 0,
         "INDEX");
 
-  if (new_fragment < 0 || new_fragment >= D->n_fragment)
+  if (new_fragment < 0 || new_fragment >= D->n_fragment) 
     GD_SET_RETURN_ERROR(D, GD_E_BAD_INDEX, 0, NULL, new_fragment, NULL);
 
   if (E->fragment_index == new_fragment) {

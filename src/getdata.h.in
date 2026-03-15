@@ -67,7 +67,7 @@ extern "C" {
 #endif
 
 /* The most recent standards version supported by this library */
-#define GD_DIRFILE_STANDARDS_VERSION 10
+#define GD_DIRFILE_STANDARDS_VERSION 11
 
 #include <math.h>
 #include <sys/types.h>
@@ -1065,6 +1065,9 @@ extern int gd_metaflush(DIRFILE *dirfile) gd_nonnull ((1));
 extern int gd_move(DIRFILE *dirfile, const char *field_code, int new_fragment,
     unsigned flags) gd_nonnull ((1,2));
 
+extern int gd_expire(DIRFILE *dirfile, off_t before_frame,
+    int fragment) gd_nonnull ((1));
+
 extern DIRFILE *gd_open(const char *dirfilename,
     unsigned long int flags) gd_nonnull ((1));
 
@@ -1091,6 +1094,8 @@ extern int gd_uninclude(DIRFILE *dirfile, int fragment_index,
 #endif
 
 /* Force the use of the 64-bit API */
+#define gd_alter_chunk_size gd_alter_chunk_size64
+#define gd_chunk_size gd_chunk_size64
 #define gd_alter_frameoffset gd_alter_frameoffset64
 #define gd_getdata gd_getdata64
 #define gd_putdata gd_putdata64
@@ -1099,12 +1104,18 @@ extern int gd_uninclude(DIRFILE *dirfile, int fragment_index,
 #define gd_nframes gd_nframes64
 #define gd_bof gd_bof64
 #define gd_eof gd_eof64
+#define gd_expire gd_expire64
 #define gd_seek gd_seek64
 #define gd_tell gd_tell64
 
 #else
 
 /* the following functions are _FILE_OFFSET_BITS sensitive.  */
+extern int gd_alter_chunk_size(DIRFILE *dirfile, off_t chunk_size,
+    int fragment) gd_nonnull ((1));
+
+extern off_t gd_chunk_size(DIRFILE *dirfile, int fragment) gd_nonnull ((1));
+
 extern int gd_alter_frameoffset(DIRFILE *dirfile, off_t offset, int fragment,
     int recode) gd_nonnull ((1));
 
@@ -1155,6 +1166,12 @@ typedef off_t gd_off64_t;
 typedef gd_int64_t gd_off64_t;
 #endif
 
+extern int gd_alter_chunk_size64(DIRFILE *dirfile, gd_off64_t chunk_size,
+    int fragment) gd_nonnull ((1));
+
+extern gd_off64_t gd_chunk_size64(DIRFILE *dirfile,
+    int fragment) gd_nonnull((1));
+
 extern int gd_alter_frameoffset64(DIRFILE *dirfile, gd_off64_t offset,
     int fragment, int recode) gd_nonnull ((1));
 
@@ -1187,6 +1204,9 @@ extern gd_off64_t gd_seek64(DIRFILE *dirfile, const char *field_code,
 
 extern gd_off64_t gd_tell64(DIRFILE *dirfile, const char *field_code) gd_nothrow
 gd_nonnull ((1,2));
+
+extern int gd_expire64(DIRFILE *dirfile, gd_off64_t before_frame,
+    int fragment) gd_nonnull ((1));
 #endif
 
 

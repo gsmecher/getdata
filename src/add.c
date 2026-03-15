@@ -348,6 +348,10 @@ static gd_entry_t *_GD_Add(DIRFILE *restrict D,
 
       E->EN(raw,data_type) = entry->EN(raw,data_type);
       E->e->u.raw.file[0].idata = E->e->u.raw.file[1].idata = -1;
+      E->e->u.raw.active_chunk = -1;
+      E->e->u.raw.first_chunk = -1;
+      E->e->u.raw.last_chunk = -1;
+      E->e->u.raw.cursor_is_raw = 0;
       E->e->u.raw.file[0].subenc = GD_ENC_UNKNOWN;
 
       E->e->u.raw.filebase = _GD_StripCode(D, entry->fragment_index, E->field,

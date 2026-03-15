@@ -42,7 +42,8 @@ static void _GD_ShiftFragment(DIRFILE* D, off64_t offset, int fragment,
       {
         if (_GD_TransformField(D, D->entry[i],
               D->fragment[fragment].encoding,
-              D->fragment[fragment].byte_sex, offset, fragment, NULL))
+              D->fragment[fragment].byte_sex, offset,
+              D->fragment[fragment].chunk_size, fragment, NULL))
           break;
       }
 
@@ -110,6 +111,268 @@ off_t gd_frameoffset(DIRFILE* D, int fragment) gd_nothrow
 {
   return gd_frameoffset64(D, fragment);
 }
+
+#endif
+
+/* Rechunk a single RAW field: read data from the current layout, delete old
+ * files, and write data into the new layout.  The fragment's chunk_size must
+ * already be set to the NEW value before calling this.  old_chunk_size is the
+ * previous value.  Streams through GD_BUFFER_SIZE so memory is bounded. */
+static int _GD_RechunkField(DIRFILE *D, gd_entry_t *E,
+    off64_t old_chunk_size, off64_t new_chunk_size)
+{
+  int frag = E->fragment_index;
+  off64_t bof, eof_samples, pos, tmp_pos;
+  int is_index, ret;
+  size_t sample_size, buf_samples, n;
+  ssize_t nread, nwrote;
+  char *buf, *tmp_filebase;
+  struct gd_raw_file_ tmp;
+
+  dtrace("%p, %p, %" PRId64 ", %" PRId64, D, E,
+      (int64_t)old_chunk_size, (int64_t)new_chunk_size);
+
+  /* No change */
+  if (old_chunk_size == new_chunk_size) {
+    dreturn("%i", 0);
+    return 0;
+  }
+
+  /* Find data range.  Temporarily restore old chunk_size for reading. */
+  D->fragment[frag].chunk_size = old_chunk_size;
+
+  bof = D->fragment[frag].frame_offset * E->EN(raw,spf);
+  is_index = 0;
+  eof_samples = _GD_GetEOF(D, E, E->field, &is_index);
+  if (D->error || eof_samples <= bof) {
+    /* Empty field or error -- just clean up old files */
+    if (old_chunk_size > 0)
+      _GD_ChunkUnlink(D, E);
+    else {
+      /* Remove non-chunked data file via encoding plugin */
+      if (_GD_Supports(D, E, GD_EF_NAME | GD_EF_UNLINK))
+        (*_GD_ef[E->e->u.raw.file[0].subenc].unlink)(
+            D->fragment[frag].dirfd, E->e->u.raw.file);
+    }
+    D->fragment[frag].chunk_size = new_chunk_size;
+    D->error = GD_E_OK;
+
+    /* Reset cached state for new layout */
+    free(E->e->u.raw.file[0].name);
+    E->e->u.raw.file[0].name = NULL;
+    E->e->u.raw.file[0].subenc = GD_ENC_UNKNOWN;
+    E->e->u.raw.file[0].mode = 0;
+    E->e->u.raw.active_chunk = -1;
+    E->e->u.raw.first_chunk = -1;
+    E->e->u.raw.last_chunk = -1;
+    E->e->u.raw.cursor_is_raw = 0;
+
+    dreturn("%i", 0);
+    return 0;
+  }
+
+  /* Read all data into the framework's read path (chunk-aware) */
+  sample_size = GD_SIZE(E->EN(raw,data_type));
+  buf_samples = GD_BUFFER_SIZE / sample_size;
+  buf = _GD_Malloc(D, GD_BUFFER_SIZE);
+  if (buf == NULL) {
+    D->fragment[frag].chunk_size = new_chunk_size;
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  /* Phase 1: Read all data and store in a temp file.  We use a flat raw
+   * temp file to avoid needing chunk-aware writes during the copy. */
+  memset(&tmp, 0, sizeof(tmp));
+  tmp.D = D;
+  tmp.subenc = GD_ENC_RAW;
+  tmp.idata = -1;
+
+  tmp_filebase = _GD_Malloc(D,
+      strlen(E->e->u.raw.filebase) + 12);
+  if (tmp_filebase == NULL) {
+    free(buf);
+    D->fragment[frag].chunk_size = new_chunk_size;
+    dreturn("%i", -1);
+    return -1;
+  }
+  sprintf(tmp_filebase, "%s_rechunk", E->e->u.raw.filebase);
+
+  if ((*_GD_ef[GD_ENC_RAW].name)(D, NULL, &tmp, tmp_filebase, 0, 0)) {
+    free(tmp_filebase);
+    free(buf);
+    D->fragment[frag].chunk_size = new_chunk_size;
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  if ((*_GD_ef[GD_ENC_RAW].open)(D->fragment[frag].dirfd, &tmp,
+        E->EN(raw,data_type), 0, GD_FILE_WRITE))
+  {
+    free(tmp.name);
+    free(tmp_filebase);
+    free(buf);
+    D->fragment[frag].chunk_size = new_chunk_size;
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  /* Read from old layout via the normal read path */
+  tmp_pos = 0;
+  for (pos = bof; pos < eof_samples; pos += (off64_t)n) {
+    n = (size_t)(eof_samples - pos);
+    if (n > buf_samples) n = buf_samples;
+
+    nread = (ssize_t)gd_getdata(D, E->field, pos / E->EN(raw,spf),
+        pos % E->EN(raw,spf), 0, n, E->EN(raw,data_type), buf);
+    if (nread <= 0) break;
+
+    (*_GD_ef[GD_ENC_RAW].seek)(&tmp, tmp_pos, E->EN(raw,data_type),
+        GD_FILE_WRITE);
+    nwrote = (*_GD_ef[GD_ENC_RAW].write)(&tmp, buf, E->EN(raw,data_type),
+        (size_t)nread);
+    if (nwrote < nread) break;
+    tmp_pos += nwrote;
+  }
+
+  (*_GD_ef[GD_ENC_RAW].close)(&tmp);
+
+  /* Phase 2: Delete old layout */
+  _GD_Flush(D, E, 0, 1);
+  if (old_chunk_size > 0)
+    _GD_ChunkUnlink(D, E);
+  else if (_GD_Supports(D, E, GD_EF_NAME | GD_EF_UNLINK))
+    (*_GD_ef[E->e->u.raw.file[0].subenc].unlink)(
+        D->fragment[frag].dirfd, E->e->u.raw.file);
+
+  /* Phase 3: Set new chunk_size and write data from temp file */
+  D->fragment[frag].chunk_size = new_chunk_size;
+
+  /* Reset entry state for new layout */
+  free(E->e->u.raw.file[0].name);
+  E->e->u.raw.file[0].name = NULL;
+  E->e->u.raw.file[0].subenc = GD_ENC_UNKNOWN;
+  E->e->u.raw.active_chunk = -1;
+  E->e->u.raw.first_chunk = -1;
+  E->e->u.raw.last_chunk = -1;
+  E->e->u.raw.cursor_is_raw = 0;
+
+  /* Reopen temp file for reading */
+  tmp.idata = -1;
+  if ((*_GD_ef[GD_ENC_RAW].open)(D->fragment[frag].dirfd, &tmp,
+        E->EN(raw,data_type), 0, GD_FILE_READ) == 0)
+  {
+    /* Write through the normal write path (chunk-aware) */
+    (*_GD_ef[GD_ENC_RAW].seek)(&tmp, 0, E->EN(raw,data_type),
+        GD_FILE_READ);
+    pos = bof;
+    for (;;) {
+      nread = (*_GD_ef[GD_ENC_RAW].read)(&tmp, buf,
+          E->EN(raw,data_type), buf_samples);
+      if (nread <= 0) break;
+
+      nwrote = (ssize_t)gd_putdata(D, E->field, pos / E->EN(raw,spf),
+          pos % E->EN(raw,spf), 0, (size_t)nread,
+          E->EN(raw,data_type), buf);
+      if (nwrote < nread) break;
+      pos += nwrote;
+    }
+
+    (*_GD_ef[GD_ENC_RAW].close)(&tmp);
+  }
+
+  /* Clean up: close new files and delete temp */
+  _GD_Flush(D, E, 0, 1);
+  gd_UnlinkAt(D, D->fragment[frag].dirfd, tmp.name, 0);
+  free(tmp.name);
+  free(tmp_filebase);
+
+  free(buf);
+
+  /* Final state reset */
+  free(E->e->u.raw.file[0].name);
+  E->e->u.raw.file[0].name = NULL;
+  E->e->u.raw.file[0].subenc = GD_ENC_UNKNOWN;
+  E->e->u.raw.file[0].mode = 0;
+  E->e->u.raw.active_chunk = -1;
+  E->e->u.raw.first_chunk = -1;
+  E->e->u.raw.last_chunk = -1;
+  E->e->u.raw.cursor_is_raw = 0;
+
+  ret = D->error ? -1 : 0;
+  dreturn("%i", ret);
+  return ret;
+}
+
+/* Set the chunk size for a fragment, re-chunking existing data as needed.
+ * Streams data through a bounded buffer so memory usage is O(GD_BUFFER_SIZE)
+ * regardless of field size. */
+int gd_alter_chunk_size64(DIRFILE* D, off64_t chunk_size, int fragment)
+{
+  int i, first, last;
+
+  dtrace("%p, %" PRId64 ", %i", D, (int64_t)chunk_size, fragment);
+
+  GD_RETURN_ERR_IF_INVALID(D);
+
+  if ((D->flags & GD_ACCMODE) != GD_RDWR)
+    GD_SET_RETURN_ERROR(D, GD_E_ACCMODE, 0, NULL, 0, NULL);
+  if (fragment < GD_ALL_FRAGMENTS || fragment >= D->n_fragment)
+    GD_SET_RETURN_ERROR(D, GD_E_BAD_INDEX, 0, NULL, 0, NULL);
+  if (chunk_size < 0)
+    GD_SET_RETURN_ERROR(D, GD_E_RANGE, GD_E_OUT_OF_RANGE, NULL, 0, NULL);
+
+  first = (fragment == GD_ALL_FRAGMENTS) ? 0 : fragment;
+  last = (fragment == GD_ALL_FRAGMENTS) ? D->n_fragment : fragment + 1;
+
+  for (i = 0; i < (int)D->n_entries; ++i) {
+    gd_entry_t *E = D->entry[i];
+    off64_t old_cs;
+
+    if (E->field_type != GD_RAW_ENTRY)
+      continue;
+    if (E->fragment_index < first || E->fragment_index >= last)
+      continue;
+
+    old_cs = D->fragment[E->fragment_index].chunk_size;
+    if (_GD_RechunkField(D, E, old_cs, chunk_size))
+      GD_RETURN_ERROR(D);
+  }
+
+  for (i = first; i < last; ++i) {
+    D->fragment[i].chunk_size = chunk_size;
+    D->fragment[i].modified = 1;
+  }
+
+  dreturn("%i", 0);
+  return 0;
+}
+
+#if !(defined _FILE_OFFSET_BITS && _FILE_OFFSET_BITS == 64)
+int gd_alter_chunk_size(DIRFILE* D, off_t chunk_size, int fragment)
+{
+  return gd_alter_chunk_size64(D, chunk_size, fragment);
+}
+#endif
+
+off64_t gd_chunk_size64(DIRFILE* D, int fragment)
+{
+  dtrace("%p, %i", D, fragment);
+
+  GD_RETURN_ERR_IF_INVALID(D);
+
+  if (fragment < 0 || fragment >= D->n_fragment)
+    GD_SET_RETURN_ERROR(D, GD_E_BAD_INDEX, 0, NULL, 0, NULL);
+
+  dreturn("%" PRId64, (int64_t)D->fragment[fragment].chunk_size);
+  return D->fragment[fragment].chunk_size;
+}
+
+#if !(defined _FILE_OFFSET_BITS && _FILE_OFFSET_BITS == 64)
+off_t gd_chunk_size(DIRFILE* D, int fragment) gd_nothrow
+{
+  return (off_t)gd_chunk_size64(D, fragment);
+}
 #endif
 
 off64_t _GD_GetEOF(DIRFILE *restrict D, gd_entry_t *restrict E,
@@ -139,24 +402,36 @@ off64_t _GD_GetEOF(DIRFILE *restrict D, gd_entry_t *restrict E,
       if (!_GD_Supports(D, E, GD_EF_NAME | GD_EF_SIZE))
         break;
 
-      if ((*_GD_ef[E->e->u.raw.file[0].subenc].name)(D,
-            (const char*)D->fragment[E->fragment_index].enc_data,
-            E->e->u.raw.file, E->e->u.raw.filebase, 0, 0))
-      {
-        break;
+      if (D->fragment[E->fragment_index].chunk_size > 0) {
+        ns = _GD_ChunkedSampleCount(D, E);
+        if (ns >= 0)
+          ns += D->fragment[E->fragment_index].frame_offset * E->EN(raw,spf);
+      } else {
+        /* Non-chunked: original single-file path */
+        if ((*_GD_ef[E->e->u.raw.file[0].subenc].name)(D,
+              (const char*)D->fragment[E->fragment_index].enc_data,
+              E->e->u.raw.file, E->e->u.raw.filebase, 0, 0))
+        {
+          break;
+        }
+
+        ns = (*_GD_ef[E->e->u.raw.file[0].subenc].size)(
+            D->fragment[E->fragment_index].dirfd, E->e->u.raw.file,
+            E->EN(raw,data_type), _GD_FileSwapBytes(D, E));
+
+        if (ns < 0) {
+          /* A missing file means an empty field, not an error */
+          if (errno == ENOENT)
+            ns = 0;
+          else {
+            _GD_SetEncIOError(D, GD_E_IO_READ, E->e->u.raw.file + 0);
+            ns = -1;
+            break;
+          }
+        }
+
+        ns += D->fragment[E->fragment_index].frame_offset * E->EN(raw,spf);
       }
-
-      ns = (*_GD_ef[E->e->u.raw.file[0].subenc].size)(
-          D->fragment[E->fragment_index].dirfd, E->e->u.raw.file,
-          E->EN(raw,data_type), _GD_FileSwapBytes(D, E));
-
-      if (ns < 0) {
-        _GD_SetEncIOError(D, GD_E_IO_READ, E->e->u.raw.file + 0);
-        ns = -1;
-        break;
-      }
-
-      ns += D->fragment[E->fragment_index].frame_offset * E->EN(raw,spf);
       break;
     case GD_BIT_ENTRY:
     case GD_LINTERP_ENTRY:
@@ -347,6 +622,23 @@ static off64_t _GD_GetBOF(DIRFILE *restrict D, gd_entry_t *restrict E,
       bof = D->fragment[E->fragment_index].frame_offset;
       *spf = E->EN(raw,spf);
       *ds = 0;
+
+      /* For chunked fields, find the first existing chunk */
+      if (D->fragment[E->fragment_index].chunk_size > 0) {
+        /* Populate cache if needed */
+        if (E->e->u.raw.first_chunk < 0)
+          _GD_PopulateChunkCache(D, E);
+
+        if (E->e->u.raw.first_chunk >= 0) {
+          /* Verify the cached first chunk still exists */
+          if (_GD_ProbeChunk(D, E, E->e->u.raw.first_chunk, NULL) <= 0) {
+            /* First chunk was deleted — rescan */
+            _GD_PopulateChunkCache(D, E);
+          }
+          if (E->e->u.raw.first_chunk >= 0)
+            bof += E->e->u.raw.first_chunk;
+        }
+      }
       break;
     case GD_BIT_ENTRY:
     case GD_SBIT_ENTRY:

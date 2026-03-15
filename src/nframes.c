@@ -38,14 +38,6 @@ off64_t gd_nframes64(DIRFILE* D)
   if (!_GD_Supports(D, D->reference_field, GD_EF_NAME | GD_EF_SIZE))
     GD_RETURN_ERROR(D);
 
-  if ((*_GD_ef[D->reference_field->e->u.raw.file[0].subenc].name)(D,
-        (const char*)D->fragment[D->reference_field->fragment_index].enc_data,
-        D->reference_field->e->u.raw.file,
-        D->reference_field->e->u.raw.filebase, 0, 0))
-  {
-    GD_RETURN_ERROR(D);
-  }
-
   /* If the reference field is open for writing, close it first to flush the
    * data
    */
@@ -56,18 +48,44 @@ off64_t gd_nframes64(DIRFILE* D)
       GD_RETURN_ERROR(D);
   }
 
-  nf = (*_GD_ef[D->reference_field->e->u.raw.file[0].subenc].size)(
-      D->fragment[D->reference_field->fragment_index].dirfd,
-      D->reference_field->e->u.raw.file, D->reference_field->EN(raw,data_type),
-      _GD_FileSwapBytes(D, D->reference_field));
+  {
+    off64_t chunk_size =
+      D->fragment[D->reference_field->fragment_index].chunk_size;
 
-  if (nf < 0) {
-    _GD_SetEncIOError(D, GD_E_IO_READ, D->reference_field->e->u.raw.file);
-    GD_RETURN_ERROR(D);
+    if (chunk_size > 0) {
+      nf = _GD_ChunkedSampleCount(D, D->reference_field);
+      if (nf < 0)
+        nf = 0;
+
+      nf /= D->reference_field->EN(raw,spf);
+      nf += D->fragment[D->reference_field->fragment_index].frame_offset;
+    } else {
+      /* Non-chunked: original single-file path */
+      if ((*_GD_ef[D->reference_field->e->u.raw.file[0].subenc].name)(D,
+            (const char*)D->fragment[
+              D->reference_field->fragment_index].enc_data,
+            D->reference_field->e->u.raw.file,
+            D->reference_field->e->u.raw.filebase, 0, 0))
+      {
+        GD_RETURN_ERROR(D);
+      }
+
+      nf = (*_GD_ef[D->reference_field->e->u.raw.file[0].subenc].size)(
+          D->fragment[D->reference_field->fragment_index].dirfd,
+          D->reference_field->e->u.raw.file,
+          D->reference_field->EN(raw,data_type),
+          _GD_FileSwapBytes(D, D->reference_field));
+
+      if (nf < 0) {
+        _GD_SetEncIOError(D, GD_E_IO_READ,
+            D->reference_field->e->u.raw.file);
+        GD_RETURN_ERROR(D);
+      }
+
+      nf /= D->reference_field->EN(raw,spf);
+      nf += D->fragment[D->reference_field->fragment_index].frame_offset;
+    }
   }
-
-  nf /= D->reference_field->EN(raw,spf);
-  nf += D->fragment[D->reference_field->fragment_index].frame_offset;
 
   dreturn("%" PRId64, (int64_t)nf);
   return nf;

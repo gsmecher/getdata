@@ -22,30 +22,34 @@
  */
 #include "internal.h"
 
-static size_t _GD_DoRawOut(DIRFILE *restrict D, gd_entry_t *restrict E,
+size_t _GD_DoRawOut(DIRFILE *restrict D, gd_entry_t *restrict E,
     off64_t s0, size_t ns, gd_type_t data_type, const void *restrict data_in)
 {
+  const struct gd_fragment_t *frag = &D->fragment[E->fragment_index];
   ssize_t n_wrote;
   void *databuffer;
+  off64_t chunk_size, spf, abs_s0, chunk_end;
+  size_t total_wrote, chunk_ns;
+  const char *write_ptr;
 
   /* check protection */
-  if (D->fragment[E->fragment_index].protection & GD_PROTECT_DATA) {
+  if (frag->protection & GD_PROTECT_DATA) {
     _GD_SetError(D, GD_E_PROTECTED, GD_E_PROTECTED_DATA, NULL, 0,
-        D->fragment[E->fragment_index].cname);
+        frag->cname);
     dreturn("%i", 0);
     return 0;
   }
 
-  dtrace("%p, %p, %" PRId64 ", %" PRIuSIZE ", 0x%X, %p", D, E, (int64_t)s0, ns,
-      data_type, data_in);
+  dtrace("%p, %p, %" PRId64 ", %" PRIuSIZE ", 0x%X, %p", D, E,
+      (int64_t)s0, ns, data_type, data_in);
 
-  if (s0 < D->fragment[E->fragment_index].frame_offset * E->EN(raw,spf)) {
+  if (s0 < frag->frame_offset * E->EN(raw,spf)) {
     _GD_SetError(D, GD_E_RANGE, GD_E_OUT_OF_RANGE, NULL, 0, NULL);
     dreturn("%i", 0);
     return 0;
   }
 
-  s0 -= D->fragment[E->fragment_index].frame_offset * E->EN(raw,spf);
+  s0 -= frag->frame_offset * E->EN(raw,spf);
 
   if (!_GD_Supports(D, E, GD_EF_OPEN | GD_EF_SEEK | GD_EF_WRITE)) {
     dreturn("%i", 0);
@@ -70,32 +74,52 @@ static size_t _GD_DoRawOut(DIRFILE *restrict D, gd_entry_t *restrict E,
   /* fix endianness, if necessary */
   if (_GD_ef[E->e->u.raw.file[0].subenc].flags & GD_EF_ECOR)
     _GD_FixEndianness(databuffer, ns, E->EN(raw,data_type), 0,
-        D->fragment[E->fragment_index].byte_sex);
+        frag->byte_sex);
 
-  /* write data to file. */
-  if (_GD_InitRawIO(D, E, NULL, -1, NULL, 0, GD_FILE_WRITE,
-        _GD_FileSwapBytes(D, E)))
-  {
-    free(databuffer);
-    dreturn("%i", 0);
-    return 0;
+  /* write data to file, splitting across chunk boundaries if needed.
+   * _GD_Seek handles file open (via _GD_InitRawIO for non-chunked,
+   * _GD_EnsureChunk for chunked) and seeking in one call. */
+  chunk_size = frag->chunk_size;
+  spf = E->EN(raw,spf);
+  abs_s0 = s0 + frag->frame_offset * spf;
+  total_wrote = 0;
+  write_ptr = databuffer;
+
+  while (ns > 0) {
+    chunk_ns = ns;
+
+    /* Clamp write to chunk boundary */
+    if (chunk_size > 0) {
+      chunk_end = ((s0 / spf) / chunk_size + 1) * chunk_size * spf;
+      if (s0 + (off64_t)chunk_ns > chunk_end)
+        chunk_ns = (size_t)(chunk_end - s0);
+    }
+
+    if (_GD_Seek(D, E, abs_s0, GD_FILE_WRITE)) {
+      free(databuffer);
+      dreturn("%" PRIuSIZE, total_wrote);
+      return total_wrote;
+    }
+
+    n_wrote = _GD_WriteOut(E, _GD_ef + E->e->u.raw.file[0].subenc,
+        write_ptr, E->EN(raw,data_type), chunk_ns, 0);
+
+    if (n_wrote < 0) {
+      _GD_SetEncIOError(D, GD_E_IO_WRITE, E->e->u.raw.file + 0);
+      n_wrote = 0;
+    }
+
+    total_wrote += (size_t)n_wrote;
+    write_ptr += (size_t)n_wrote * E->e->u.raw.size;
+    s0 += n_wrote;
+    abs_s0 += n_wrote;
+    ns -= (size_t)n_wrote;
+
+    if ((size_t)n_wrote < chunk_ns)
+      break;  /* short write */
   }
 
-  if (_GD_DoSeek(D, E, _GD_ef + E->e->u.raw.file[0].subenc, s0, GD_FILE_WRITE)
-      < 0)
-  {
-    free(databuffer);
-    dreturn("%i", 0);
-    return 0;
-  }
-
-  n_wrote = _GD_WriteOut(E, _GD_ef + E->e->u.raw.file[0].subenc, databuffer,
-      E->EN(raw,data_type), ns, 0);
-
-  if (n_wrote < 0) {
-    _GD_SetEncIOError(D, GD_E_IO_WRITE, E->e->u.raw.file + 0);
-    n_wrote = 0;
-  }
+  n_wrote = (ssize_t)total_wrote;
 
   free(databuffer);
 
