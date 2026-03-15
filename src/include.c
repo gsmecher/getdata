@@ -332,6 +332,7 @@ int _GD_Include(DIRFILE *D, struct parser_state *p, const char *ename,
     ;
   D->fragment[me].ref_name = NULL;
   D->fragment[me].frame_offset = D->fragment[parent].frame_offset;
+  D->fragment[me].chunk_size = D->fragment[parent].chunk_size;
   D->fragment[me].protection = GD_PROTECT_NONE;
   D->fragment[me].px = px;
   D->fragment[me].pxl = px ? strlen(px) : 0;

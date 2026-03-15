@@ -1054,6 +1054,10 @@ struct gd_private_entry_ {
       time_t atime; /* Access time, with second resolution */
       int fd_count; /* Number of open files */
       struct gd_raw_file_ file[2]; /* encoding framework data */
+      off64_t active_chunk; /* frame offset of currently open chunk, -1=none */
+      off64_t first_chunk;  /* frame offset of first existing chunk, -1=unknown */
+      off64_t last_chunk;   /* frame offset of last existing chunk, -1=unknown */
+      int cursor_is_raw;    /* 1 if active_chunk is open as raw (unencoded) */
     } raw;
     struct { /* LINTERP */
       char *table_file;
@@ -1088,6 +1092,8 @@ struct gd_private_entry_ {
 #define GD_N_SUBENCODINGS 13
 
 /* the last record of the _GD_ef array is always the unknown encoding */
+/* subencoding indices into the _GD_ef array */
+#define GD_ENC_RAW 0
 #define GD_ENC_UNKNOWN (GD_N_SUBENCODINGS - 1)
 
 /* Internal gd_entry_t flags */
@@ -1199,6 +1205,7 @@ struct gd_fragment_t {
   int protection;
   char* ref_name;
   off64_t frame_offset;
+  off64_t chunk_size;   /* chunk size in frames, 0 = no chunking */
   uint32_t vers;
 
   char *ns; /* root namespace */
@@ -1332,6 +1339,7 @@ int _GD_StrError(int errnum, char *buf, size_t buflen);
 
 char *_GD_MakeFullPathOnly(const DIRFILE *D, int dirfd, const char *name);
 int _GD_MakeTempFile(const DIRFILE*, int, char*);
+int _GD_MakeTempDir(const DIRFILE*, int, char*);
 
 #ifdef USE_MODULES
 #ifdef __cplusplus
@@ -1395,6 +1403,19 @@ int _GD_FindInputs(DIRFILE *restrict, gd_entry_t *restrict, int) gd_nothrow;
 uint64_t _GD_FindVersion(DIRFILE *D);
 void _GD_FixEndianness(void*, size_t, gd_type_t, unsigned, unsigned);
 int _GD_FileSwapBytes(const DIRFILE *restrict, const gd_entry_t *restrict);
+/* Chunk iteration callback: return 0 to continue, non-zero to stop */
+typedef int (*gd_chunk_cb_t)(DIRFILE*, gd_entry_t*, off64_t chunk_frame,
+    const char *filename, void *data);
+
+int _GD_ChunkMove(DIRFILE*, gd_entry_t*, int, const char*);
+int _GD_ChunkExpire(DIRFILE*, gd_entry_t*, off64_t);
+int _GD_ChunkUnlink(DIRFILE*, gd_entry_t*);
+off64_t _GD_ChunkedSampleCount(DIRFILE*, gd_entry_t*);
+int _GD_EnsureChunk(DIRFILE*, gd_entry_t*, off64_t*, unsigned int);
+int _GD_FinalizeChunk(DIRFILE*, gd_entry_t*);
+int _GD_ForEachChunk(DIRFILE*, gd_entry_t*, gd_chunk_cb_t, void*);
+void _GD_PopulateChunkCache(DIRFILE*, gd_entry_t*);
+int _GD_ProbeChunk(DIRFILE*, gd_entry_t*, off64_t, off64_t*);
 int _GD_FiniRawIO(DIRFILE*, const gd_entry_t*, int, int);
 void _GD_Flush(DIRFILE *restrict, gd_entry_t *restrict, int, int);
 void _GD_FlushMeta(DIRFILE* D, int fragment, int force);
@@ -1434,8 +1455,10 @@ int _GD_ListEntry(const gd_entry_t*, int, int, int, int, int, gd_entype_t);
 char *_GD_MakeFullPath(DIRFILE *restrict, int, const char *restrict, int);
 void *_GD_Malloc(DIRFILE *D, size_t size) __attribute_malloc__;
 int _GD_MissingFramework(int encoding, unsigned int funcs);
-int _GD_MogrifyFile(DIRFILE *restrict, gd_entry_t *restrict, unsigned long int,
-    unsigned long int, off64_t, int, int, char *restrict);
+int _GD_TransformField(DIRFILE*, gd_entry_t*, unsigned long, unsigned long,
+    off64_t, off64_t, int, const char*);
+size_t _GD_DoRawOut(DIRFILE *restrict, gd_entry_t *restrict, off64_t, size_t,
+    gd_type_t, const void *restrict);
 gd_type_t _GD_NativeType(DIRFILE *restrict, gd_entry_t *restrict, int);
 char *_GD_NormaliseNamespace(DIRFILE *restrict, const char *restrict,
     size_t *restrict) __attribute_malloc__;

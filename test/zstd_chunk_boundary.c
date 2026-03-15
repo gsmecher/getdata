@@ -18,60 +18,52 @@
  * along with GetData; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
+/* Test write that crosses a chunk boundary: write straddles two chunks */
 #include "test.h"
 
 int main(void)
 {
-#if !defined USE_ZSTD || !defined TEST_ZSTD
-  return 77; /* skip test */
+#if !defined TEST_ZSTD || !defined USE_ZSTD
+  return 77;
 #else
   const char *filedir = "dirfile";
   const char *format = "dirfile/format";
-  const char *data = "dirfile/data";
-  const char *zstddata = "dirfile/data.zst";
-  uint16_t c1[8], c2[8];
-  char command[4096];
-  int i, n1, e1, e2, n2, e3, r = 0;
+  uint32_t c[4], d[4];
+  int i, n, m, e1, e2, e3, r = 0;
   DIRFILE *D;
 
-  memset(c1, 0, 16);
-  memset(c2, 0, 16);
   rmdirfile();
   mkdir(filedir, 0700);
 
-  MAKEFORMATFILE(format, "data RAW UINT16 8\n");
-  MAKEDATAFILE(data, uint16_t, i, 256);
+  for (i = 0; i < 4; ++i)
+    c[i] = (uint32_t)(100 + i);
 
-  /* compress */
-  snprintf(command, 4096, "\"%s\" -qf --rm %s > %s", ZSTD, data, NULL_DEVICE);
-  if (gd_system(command))
-    return 1;
+  /* chunk_size=2 frames, spf=1: each chunk holds 2 samples.
+   * Write 4 samples starting at frame 1 -- crosses boundary at frame 2 */
+  MAKEFORMATFILE(format,
+      "/ENCODING zstd\n/CHUNK 2\ndata RAW UINT32 1\n");
 
-  D = gd_open(filedir, GD_RDONLY | GD_VERBOSE);
-  n1 = gd_getdata(D, "data", 5, 0, 1, 0, GD_UINT16, c1);
+  D = gd_open(filedir, GD_RDWR | GD_VERBOSE);
+  n = gd_putdata(D, "data", 1, 0, 0, 4, GD_UINT32, c);
   e1 = gd_error(D);
-  CHECKI(e1, 0);
-  CHECKI(n1, 8);
+  CHECKI(e1, GD_E_OK);
+  CHECKI(n, 4);
 
   e2 = gd_close(D);
   CHECKI(e2, 0);
 
+  /* Reopen and read back */
   D = gd_open(filedir, GD_RDONLY | GD_VERBOSE);
-  n2 = gd_getdata(D, "data", 5, 0, 1, 0, GD_UINT16, c2);
+  m = gd_getdata(D, "data", 1, 0, 0, 4, GD_UINT32, d);
   e3 = gd_error(D);
-  CHECKI(e3, 0);
-  CHECKI(n2, 8);
-  for (i = 0; i < 8; ++i) {
-    CHECKUi(i,c1[i], 40 + i);
-    CHECKUi(i,c2[i], 40 + i);
-  }
+  CHECKI(e3, GD_E_OK);
+  CHECKI(m, 4);
+
+  for (i = 0; i < 4; ++i)
+    CHECKIi(i, d[i], c[i]);
 
   gd_discard(D);
-
-  unlink(zstddata);
-  unlink(format);
-  rmdir(filedir);
-
+  rmdirfile();
   return r;
 #endif
 }

@@ -65,7 +65,7 @@ int main(void)
   CHECKI(stat_data, 0);
 
   /* uncompress */
-  snprintf(command, 4096, "\"%s\" -df %s > %s", ZSTD, data_zst, NULL_DEVICE);
+  snprintf(command, 4096, "\"%s\" -qdf %s > %s", ZSTD, data_zst, NULL_DEVICE);
   if (gd_system(command)) {
     r = 1;
   } else {

@@ -1,3 +1,4 @@
+data.zst
 add_add
 add_affix
 add_alias
@@ -1683,6 +1684,11 @@ zstd_uint16
 zstd_uint32
 zstd_uint64
 zstd_uint8
+zstd_chunk_backward
+zstd_chunk_boundary
+zstd_chunk_nframes
+zstd_chunk_put_get
+zstd_chunk_stress
 zzip_data
 zzip_get
 zzip_get_get

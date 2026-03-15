@@ -567,6 +567,7 @@ static DIRFILE *_GD_Open(DIRFILE *D, int dirfd, const char *filedir,
       ) | (D->flags & GD_ARM_FLAG);
   D->fragment[0].ref_name = NULL;
   D->fragment[0].frame_offset = 0;
+  D->fragment[0].chunk_size = 0;
   D->fragment[0].mtime = mtime;
   D->fragment[0].protection = GD_PROTECT_NONE;
   D->fragment[0].vers = (flags & GD_PEDANTIC) ? GD_DIRFILE_STANDARDS_VERSION :

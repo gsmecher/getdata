@@ -262,22 +262,84 @@ static size_t _GD_DoRaw(DIRFILE *restrict D, gd_entry_t *restrict E, off64_t s0,
     }
 
   if (ns > 0) {
-    samples_read = (*_GD_ef[E->e->u.raw.file[0].subenc].read)(E->e->u.raw.file,
-          databuffer + zeroed_samples * E->e->u.raw.size, E->EN(raw,data_type),
-          ns);
+    off64_t chunk_size = D->fragment[E->fragment_index].chunk_size;
+    off64_t spf = E->EN(raw,spf);
+    off64_t read_s0 = s0 - E->EN(raw,spf) *
+      D->fragment[E->fragment_index].frame_offset;
+    size_t remaining = ns;
+    char *read_ptr = databuffer + zeroed_samples * E->e->u.raw.size;
 
-    if (samples_read == -1) {
-      _GD_SetEncIOError(D, GD_E_IO_READ, E->e->u.raw.file + 0);
-      free(databuffer);
-      dreturn("%i", 0);
-      return 0;
+    while (remaining > 0) {
+      ssize_t chunk_read;
+      size_t chunk_ns = remaining;
+
+      /* Clamp read to chunk boundary */
+      if (chunk_size > 0) {
+        off64_t chunk_end = ((read_s0 / spf) / chunk_size + 1)
+          * chunk_size * spf;
+        if (read_s0 + (off64_t)chunk_ns > chunk_end)
+          chunk_ns = (size_t)(chunk_end - read_s0);
+      }
+
+      /* Missing chunk (file doesn't exist): zero-fill */
+      if (chunk_size > 0 && E->e->u.raw.file[0].idata < 0) {
+        _GD_FillZero(read_ptr, E->EN(raw,data_type), chunk_ns);
+        chunk_read = (ssize_t)chunk_ns;
+      } else {
+        chunk_read = (*_GD_ef[E->e->u.raw.file[0].subenc].read)(
+              E->e->u.raw.file, read_ptr, E->EN(raw,data_type), chunk_ns);
+
+        if (chunk_read == -1) {
+          if (samples_read == 0) {
+            _GD_SetEncIOError(D, GD_E_IO_READ, E->e->u.raw.file + 0);
+            free(databuffer);
+            dreturn("%i", 0);
+            return 0;
+          }
+          break;
+        }
+
+        if (_GD_ef[E->e->u.raw.file[0].subenc].flags & GD_EF_ECOR)
+          _GD_FixEndianness(read_ptr, chunk_read, E->EN(raw,data_type),
+              D->fragment[E->fragment_index].byte_sex, 0);
+      }
+
+      samples_read += chunk_read;
+      read_ptr += chunk_read * E->e->u.raw.size;
+      read_s0 += chunk_read;
+      remaining -= (size_t)chunk_read;
+
+      if ((size_t)chunk_read < chunk_ns) {
+        /* Short read: for chunked fields, zero-fill the rest of the
+         * chunk if later chunks exist (the file is shorter than the
+         * chunk boundary but data continues beyond). */
+        if (chunk_size > 0 && remaining > 0) {
+          off64_t next_chunk = ((read_s0 / spf) / chunk_size + 1)
+            * chunk_size;
+          if (_GD_ProbeChunk(D, E, next_chunk, NULL) > 0) {
+            size_t shortfall = chunk_ns - (size_t)chunk_read;
+            _GD_FillZero(read_ptr, E->EN(raw,data_type), shortfall);
+            samples_read += shortfall;
+            read_ptr += shortfall * E->e->u.raw.size;
+            read_s0 += shortfall;
+            remaining -= shortfall;
+          } else {
+            break;  /* last chunk: short read is EOF */
+          }
+        } else {
+          break;  /* non-chunked or no more data requested */
+        }
+      }
+
+      /* If chunking, seek to next chunk */
+      if (chunk_size > 0 && remaining > 0) {
+        if (_GD_Seek(D, E, read_s0 + E->EN(raw,spf) *
+              D->fragment[E->fragment_index].frame_offset, GD_FILE_READ))
+        {
+          break;
+        }
+      }
     }
-
-    if (_GD_ef[E->e->u.raw.file[0].subenc].flags & GD_EF_ECOR)
-      _GD_FixEndianness(databuffer + zeroed_samples * E->e->u.raw.size,
-          samples_read, E->EN(raw,data_type),
-          D->fragment[E->fragment_index].byte_sex, 0);
-
   }
 
   n_read = samples_read + zeroed_samples;
@@ -287,8 +349,13 @@ static size_t _GD_DoRaw(DIRFILE *restrict D, gd_entry_t *restrict E, off64_t s0,
 
   free(databuffer);
 
-  dreturn("%" PRIuSIZE, (D->error == GD_E_OK) ? n_read : (size_t)0);
-  return (D->error == GD_E_OK) ? n_read : (size_t)0;
+  if (D->error != GD_E_OK) {
+    dreturn("%i", 0);
+    return 0;
+  }
+
+  dreturn("%" PRIuSIZE, n_read);
+  return n_read;
 }
 
 /* Macros to reduce tangly code */

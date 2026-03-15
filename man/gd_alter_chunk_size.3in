@@ -1,0 +1,77 @@
+.\" gd_alter_chunk_size.3.  The gd_alter_chunk_size man page.
+.\"
+.\" Copyright (C) 2026 G. Smecher
+.\"
+.\""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+.\"
+.\" This file is part of the GetData project.
+.\"
+.\" Permission is granted to copy, distribute and/or modify this document
+.\" under the terms of the GNU Free Documentation License, Version 1.2 or
+.\" any later version published by the Free Software Foundation; with no
+.\" Invariant Sections, with no Front-Cover Texts, and with no Back-Cover
+.\" Texts.  A copy of the license is included in the `COPYING.DOC' file
+.\" as part of this distribution.
+.\"
+.TH gd_alter_chunk_size 3 "March 2026" "Version 0.12.0" "GETDATA"
+
+.SH NAME
+gd_alter_chunk_size \(em set the chunk size for a Dirfile fragment
+
+.SH SYNOPSIS
+.B #include <getdata.h>
+.HP
+.BI "int gd_alter_chunk_size(DIRFILE *" dirfile ", off_t " chunk_size ,
+.BI "int " fragment_index );
+
+.SH DESCRIPTION
+The
+.FN gd_alter_chunk_size
+function sets the chunk size (in frames) of the format specification fragment
+given by
+.ARG fragment_index
+in the dirfile(5) database specified by
+.ARG dirfile .
+See the
+.B /CHUNK
+directive in
+.BR dirfile\-format (5)
+for details on chunked data storage.
+.PP
+The chunk size can only be set on fragments that are not already chunked
+(i.e., whose current chunk size is zero).  Attempting to change the chunk size
+of an already-chunked fragment will fail with
+.BR GD_E_ARGUMENT .
+To disable chunking, set
+.ARG chunk_size
+to zero.
+.PP
+In addition to being simply a valid fragment index,
+.ARG fragment_index
+may also be the special value
+.BR GD_ALL_FRAGMENTS ,
+which indicates that the chunk size of all fragments in the database should
+be set.
+
+.SH RETURN VALUE
+Upon successful completion,
+.FN gd_alter_chunk_size
+returns zero.  On error, it returns a negative-valued error code.  Possible
+error codes are:
+.DD GD_E_ACCMODE
+The specified dirfile was opened read-only.
+.DD GD_E_ARGUMENT
+The specified fragment is already chunked and a non-zero chunk size was given.
+.DD GD_E_BAD_DIRFILE
+The supplied dirfile was invalid.
+.DD GD_E_BAD_INDEX
+The supplied index was out of range.
+.DD GD_E_RANGE
+The supplied chunk size was negative.
+
+.SH SEE ALSO
+.F3 gd_open ,
+.F3 gd_error ,
+.F3 gd_error_string ,
+dirfile(5),
+dirfile-format(5)

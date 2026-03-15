@@ -555,7 +555,9 @@ ZSTD_TESTS=zstd_add zstd_complex64 zstd_complex128 zstd_del zstd_enoent \
 					 zstd_put zstd_put_back zstd_put_endian zstd_put_get \
 					 zstd_put_nframes zstd_put_off zstd_put_offs zstd_put_pad \
 					 zstd_put_sub zstd_seek zstd_seek_far zstd_seek_put zstd_sync \
-					 zstd_uint8 zstd_uint16 zstd_uint32 zstd_uint64
+					 zstd_uint8 zstd_uint16 zstd_uint32 zstd_uint64 \
+					 zstd_chunk_put_get zstd_chunk_nframes zstd_chunk_boundary \
+					 zstd_chunk_backward zstd_chunk_stress
 
 ZZIP_TESTS=zzip_data zzip_get zzip_get_get zzip_nframes zzip_seek zzip_seek_far
 

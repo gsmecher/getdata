@@ -555,6 +555,10 @@ static gd_entry_t *_GD_ParseRaw(DIRFILE *restrict D,
 
   E->field_type = GD_RAW_ENTRY;
   E->e->u.raw.file[0].idata = E->e->u.raw.file[1].idata = -1;
+  E->e->u.raw.active_chunk = -1;
+  E->e->u.raw.first_chunk = -1;
+  E->e->u.raw.last_chunk = -1;
+  E->e->u.raw.cursor_is_raw = 0;
   E->e->u.raw.file[0].subenc = GD_ENC_UNKNOWN; /* don't know the encoding
                                                     subscheme yet */
 
@@ -2223,6 +2227,18 @@ static int _GD_ParseDirective(DIRFILE *D, struct parser_state *restrict p,
         }
 
         _GD_ParseAlias(D, p, in_cols + 1, in_cols[2], me);
+      }
+      break;
+    case 'C':
+      if (strcmp(ptr, "CHUNK") == 0 && GD_PVERS_GE(*p, 11)) {
+        off64_t cs;
+        matched = 1;
+        cs = gd_strtoll(in_cols[1], NULL, GD_PVERS_GE(*p, 9) ? 0 : 10);
+        if (cs > 0)
+          D->fragment[me].chunk_size = cs;
+        else if (cs != 0)
+          _GD_SetError(D, GD_E_FORMAT, GD_E_FORMAT_BAD_SPF, p->file, p->line,
+              in_cols[1]);
       }
       break;
     case 'E':

@@ -24,11 +24,11 @@ AUTOMAKE_OPTIONS = foreign
 # .3in files are created by configure from a .3in.in file.
 MAN3S = gd_add.3 gd_add_alias.3 gd_add_bit.3 gd_add_spec.3 gd_alias_target.3 \
 				gd_aliases.3 gd_alloc_funcs.3 gd_alter_affixes.3 gd_alter_bit.3 \
-				gd_alter_entry.3 gd_alter_protection.3 gd_alter_spec.3 gd_array_len.3 \
+				gd_alter_chunk_size.3 gd_alter_entry.3 gd_alter_protection.3 gd_alter_spec.3 gd_array_len.3 \
 				gd_bof.3 gd_bof64.3 gd_carrays.3 gd_close.3 gd_constants.3 gd_delete.3 \
 				gd_desync.3 gd_dirfile_standards.3 gd_dirfilename.3 gd_encoding.3 \
 				gd_encoding_support.3 gd_endianness.3 gd_entry.3 gd_entry_list.3 \
-				gd_entry_type.3 gd_eof.3 gd_eof64.3 gd_error.3 gd_error_count.3 \
+				gd_entry_type.3 gd_eof.3 gd_eof64.3 gd_error.3 gd_error_count.3 gd_expire.3 \
 				gd_flags.3 gd_flush.3 gd_fragment_affixes.3 gd_fragment_index.3 \
 				gd_fragment_namespace.3 gd_fragmentname.3 gd_framenum_subset.3 \
 				gd_framenum_subset64.3 gd_frameoffset.3 gd_frameoffset64.3 \

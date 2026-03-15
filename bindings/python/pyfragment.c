@@ -242,6 +242,72 @@ static PyObject *gdpy_fragment_setoffset(struct gdpy_fragment_t *self,
   return Py_None;
 }
 
+static PyObject *gdpy_fragment_getchunksize(struct gdpy_fragment_t *self,
+    void *closure)
+{
+  gd_off64_t chunk_size;
+  PyObject *pyobj;
+
+  dtrace("%p, %p", self, closure);
+
+  chunk_size = gd_chunk_size64(self->dirfile->D, self->n);
+
+  GDPY_CHECK_ERROR(self->dirfile->D, NULL, self->dirfile->char_enc);
+
+  pyobj = PyLong_FromLongLong((PY_LONG_LONG)chunk_size);
+
+  dreturn("%p", pyobj);
+  return pyobj;
+}
+
+static PyObject *gdpy_fragment_setchunksize(struct gdpy_fragment_t *self,
+    PyObject *args, PyObject *keys)
+{
+  char *keywords[] = { "chunk_size", NULL };
+  PY_LONG_LONG chunk_size;
+
+  dtrace("%p, %p, %p", self, args, keys);
+
+  if (!PyArg_ParseTupleAndKeywords(args, keys,
+        "L:pygetdata.fragment.alter_chunk_size", keywords, &chunk_size))
+  {
+    dreturn("%p", NULL);
+    return NULL;
+  }
+
+  gd_alter_chunk_size64(self->dirfile->D, (gd_off64_t)chunk_size, self->n);
+
+  GDPY_CHECK_ERROR(self->dirfile->D, NULL, self->dirfile->char_enc);
+
+  Py_INCREF(Py_None);
+  dreturn("%p", Py_None);
+  return Py_None;
+}
+
+static PyObject *gdpy_fragment_expire(struct gdpy_fragment_t *self,
+    PyObject *args, PyObject *keys)
+{
+  char *keywords[] = { "before_frame", NULL };
+  PY_LONG_LONG before_frame;
+
+  dtrace("%p, %p, %p", self, args, keys);
+
+  if (!PyArg_ParseTupleAndKeywords(args, keys,
+        "L:pygetdata.fragment.expire", keywords, &before_frame))
+  {
+    dreturn("%p", NULL);
+    return NULL;
+  }
+
+  gd_expire64(self->dirfile->D, (gd_off64_t)before_frame, self->n);
+
+  GDPY_CHECK_ERROR(self->dirfile->D, NULL, self->dirfile->char_enc);
+
+  Py_INCREF(Py_None);
+  dreturn("%p", Py_None);
+  return Py_None;
+}
+
 static PyObject *gdpy_fragment_getparent(struct gdpy_fragment_t *self,
     void *closure)
 {
@@ -477,6 +543,10 @@ static int gdpy_fragment_setsuffix(struct gdpy_fragment_t *self,
 }
 
 static PyGetSetDef gdpy_fragment_getset[] = {
+  { "chunk_size", (getter)gdpy_fragment_getchunksize, NULL,
+    "The chunk size of this fragment in frames.  Zero means no chunking.\n"
+      "To change this value, use the alter_chunk_size method.",
+    NULL },
   { "encoding", (getter)gdpy_fragment_getencoding, NULL,
     "The encoding scheme of this fragment.  This will be one of the\n"
       "pygetdata.*_ENCODED symbols.  To change this value, use the\n"
@@ -529,6 +599,13 @@ static PyGetSetDef gdpy_fragment_getset[] = {
 };
 
 static PyMethodDef gdpy_fragment_methods[] = {
+  {"alter_chunk_size", (PyCFunction)gdpy_fragment_setchunksize,
+    METH_VARARGS | METH_KEYWORDS,
+    "alter_chunk_size(chunk_size)\n\n"
+      "Change the chunk size of this fragment.  The 'chunk_size' parameter\n"
+      "specifies the new chunk size in frames.  Set to zero to disable\n"
+      "chunking.  See gd_alter_chunk_size(3)."
+  },
   {"alter_encoding", (PyCFunction)gdpy_fragment_setencoding,
     METH_VARARGS | METH_KEYWORDS,
     "alter_encoding(encoding [, recode])\n\n"
@@ -558,6 +635,14 @@ static PyMethodDef gdpy_fragment_methods[] = {
       "given, and is non-zero, the RAW files affected bt this change will\n"
       "be shifted appropriately for the new frame offset.  See\n"
       "gd_alter_frameoffset(3)."
+  },
+  {"expire", (PyCFunction)gdpy_fragment_expire,
+    METH_VARARGS | METH_KEYWORDS,
+    "expire(before_frame)\n\n"
+      "Remove chunk files containing data before 'before_frame' from all\n"
+      "RAW fields in this fragment.  Only complete chunks whose frame\n"
+      "range falls entirely before 'before_frame' are removed.  The\n"
+      "fragment must have a non-zero chunk size.  See gd_expire(3)."
   },
   {"rewrite", (PyCFunction)gdpy_fragment_rewrite, METH_NOARGS,
     "rewrite()\n\n"

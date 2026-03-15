@@ -72,6 +72,13 @@ fields is reset to the beginning-of-field.
 If
 .ARG recode
 is zero, affected binary files are left untouched.
+.PP
+Recoding is not supported for fields on fragments with a non-zero chunk size
+(see
+.BR dirfile-format (5)).
+To recode chunked fields, first set the chunk size to zero with
+.BR gd_alter_chunk_size (3),
+perform the recode, then restore the chunk size.
 
 .SH RETURN VALUE
 Upon successful completion,

@@ -1,0 +1,116 @@
+.\" gd_expire.3.  The gd_expire man page.
+.\"
+.\" Copyright (C) 2026 G. Smecher
+.\"
+.\""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+.\"
+.\" This file is part of the GetData project.
+.\"
+.\" Permission is granted to copy, distribute and/or modify this document
+.\" under the terms of the GNU Free Documentation License, Version 1.2 or
+.\" any later version published by the Free Software Foundation; with no
+.\" Invariant Sections, with no Front-Cover Texts, and with no Back-Cover
+.\" Texts.  A copy of the license is included in the `COPYING.DOC' file
+.\" as part of this distribution.
+.\"
+.TH gd_expire 3 "16 March 2026" "Version 0.13.0" "GETDATA"
+
+.SH NAME
+gd_expire \(em remove expired chunk files from a Dirfile fragment
+
+.SH SYNOPSIS
+.SC
+.B #include <getdata.h>
+.HP
+.BI "int gd_expire(DIRFILE *" dirfile ", off_t " before_frame ,
+.BI "int " fragment );
+.EC
+
+.SH DESCRIPTION
+The
+.FN gd_expire
+function removes chunk files containing data before
+.ARG before_frame
+from all
+.B RAW
+fields in the fragment specified by
+.ARG fragment
+in the dirfile(5) database specified by
+.ARG dirfile .
+This is intended for implementing a rolling data buffer, where old data is
+discarded to free disk space while new data continues to be appended.
+.PP
+If
+.ARG fragment
+is the special value
+.BR GD_ALL_FRAGMENTS ,
+all fragments in the database are processed.
+.PP
+Only complete chunks whose frame range falls entirely before
+.ARG before_frame
+are removed.  The chunk containing
+.ARG before_frame
+is preserved.  The
+.ARG before_frame
+argument is in the same coordinate space as
+.FN gd_getdata
+(i.e., it includes the fragment's
+.BR /FRAMEOFFSET ).
+.PP
+The fragment must have a non-zero
+.B /CHUNK
+size (see
+.BR dirfile\-format (5)).
+Calling this function on a non-chunked fragment returns
+.BR GD_E_UNSUPPORTED .
+.PP
+After expiry, the
+.FN gd_bof
+function will return the start of the first remaining chunk for each affected
+field.
+.PP
+Expiry is best-effort: if a chunk file cannot be removed (for example, because
+another process has it open), the function continues to the next field rather
+than aborting immediately.  All fields are attempted regardless of per-field
+failures.  If any chunk files could not be removed,
+.B GD_E_IO
+is returned after all fields have been processed.  The caller may retry the
+operation later, once the obstructing process has released the file.
+
+.SH RETURN VALUE
+On success, zero is returned.  On error, a negative-valued error code is
+returned.  Possible error codes are:
+.DD GD_E_ACCMODE
+The specified dirfile was opened read-only.
+.DD GD_E_BAD_DIRFILE
+The supplied dirfile was invalid.
+.DD GD_E_BAD_INDEX
+The supplied fragment index was out of range.
+.DD GD_E_IO
+An I/O error occurred while attempting to unlink one or more chunk files.
+This may indicate that the files are in use by another process.  Expiry of
+other fields in the fragment was still attempted.
+.DD GD_E_PROTECTED
+The binary data of the fragment is protected from change.
+.DD GD_E_UNSUPPORTED
+The fragment does not use chunked storage (the fragment's
+.B /CHUNK
+size is zero).
+.PP
+The error code is also stored in the
+.B DIRFILE
+object and may be retrieved after this function returns by calling
+.F3 gd_error .
+A descriptive error string for the error may be obtained by calling
+.F3 gd_error_string .
+
+.SH SEE ALSO
+.F3 gd_alter_chunk_size ,
+.F3 gd_bof ,
+.F3 gd_delete ,
+.F3 gd_error ,
+.F3 gd_error_string ,
+.F3 gd_getdata ,
+.F3 gd_nframes ,
+.F3 gd_open ,
+dirfile(5), dirfile-format(5)
