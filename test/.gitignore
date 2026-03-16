@@ -309,6 +309,12 @@ calist_meta_hidden
 calist_meta_meta
 calist_meta_parent
 calist_null
+chunk_alter
+chunk_alter_empty
+chunk_alter_range
+chunk_alter_rdonly
+chunk_alter_rechunk
+chunk_alter_unchunk
 close_bad
 close_close
 close_discard

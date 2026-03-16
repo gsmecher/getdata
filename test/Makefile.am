@@ -117,6 +117,9 @@ CALIST_TESTS=calist calist0 calist_free calist_hidden calist_long calist_meta \
 						 calist_meta0 calist_meta_free calist_meta_hidden calist_meta_meta \
 						 calist_meta_parent calist_null
 
+CHUNK_TESTS=chunk_alter chunk_alter_empty chunk_alter_range chunk_alter_rdonly \
+						chunk_alter_rechunk chunk_alter_unchunk
+
 CLOSE_TESTS=close_bad close_close close_discard close_null
 
 CONVERT_TESTS=convert_complex128_complex64 convert_complex128_float64 \
@@ -596,7 +599,7 @@ TESTS=$(ADD_TESTS)      $(ALIAS_TESTS)    $(ALLOC_TESTS)    $(ALTER_TESTS)    \
 			$(TABLE_TESTS)    $(TELL_TESTS)     $(TOK_TESTS)      $(TRUNC_TESTS)    \
 			$(UNCLUDE_TESTS)  $(VALID_TESTS)    $(VERSION_TESTS)  $(VLIST_TESTS)    \
 			$(ZSTD_TESTS)     $(ZZIP_TESTS)     $(ZZSLIM_TESTS)   \
-			$(GZIP_CHUNK_TESTS)
+			$(CHUNK_TESTS)    $(GZIP_CHUNK_TESTS)
 
 check_PROGRAMS=$(TESTS)
 
