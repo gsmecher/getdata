@@ -209,3 +209,4 @@ int gd_system(const char* command)
     (uint64_t)(n),(uint64_t)(v))
 #define CHECKXi(i,n,v) CHECKi(i,(n) != (v),n,"0x%" PRIX64,"0x%" PRIX64,\
     (uint64_t)(n),(uint64_t)(v))
+

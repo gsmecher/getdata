@@ -26,10 +26,7 @@ int main(void)
   return 77;
 #else
   const char *filedir = "dirfile";
-  const char *format = "dirfile/format";
-  const char *format1 = "dirfile/format1";
-  const char *data = "dirfile/data" ENC_SUFFIX;
-  int e1, e2, e3, r = 0;
+  int e1, e2, e3, e4, r = 0;
   DIRFILE *D;
   const int8_t data_in[8] = { -5, 6, -10, 100, 0, 1, -100, 3 };
   int8_t data_out[8];
@@ -43,23 +40,23 @@ int main(void)
   e1 = gd_add_spec(D, "data RAW INT8 1", 0);
   CHECKI(e1, 0);
 
-  e2 = gd_putdata(D, "data", 0, 0, 0, 8, GD_INT8, data_in);
-  CHECKI(e2, 8);
+  e2 = gd_alter_chunk_size(D, ENC_CHUNK_SIZE, 0);
+  CHECKI(e2, 0);
 
-  e3 = gd_getdata(D, "data", 0, 0, 0, 8, GD_INT8, data_out);
+  e3 = gd_putdata(D, "data", 0, 0, 0, 8, GD_INT8, data_in);
   CHECKI(e3, 8);
+
+  e4 = gd_getdata(D, "data", 0, 0, 0, 8, GD_INT8, data_out);
+  CHECKI(e4, 8);
 
   gd_discard(D);
 
-  if (e3 > 8)
-    e3 = 8;
-  for (i = 0; i < e3; ++i)
+  if (e4 > 8)
+    e4 = 8;
+  for (i = 0; i < e4; ++i)
     CHECKIi(i, data_out[i], data_in[i]);
 
-  unlink(format1);
-  unlink(format);
-  unlink(data);
-  rmdir(filedir);
+  rmdirfile();
 
   return r;
 #endif

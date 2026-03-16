@@ -26,10 +26,7 @@ int main(void)
   return 77;
 #else
   const char *filedir = "dirfile";
-  const char *format = "dirfile/format";
-  const char *format1 = "dirfile/format1";
-  const char *data = "dirfile/data" ENC_SUFFIX;
-  int e1, e2, e3, r = 0;
+  int e1, e2, e3, e4, r = 0;
   DIRFILE *D;
   float data_out[8];
   int i = 0;
@@ -49,26 +46,26 @@ int main(void)
   e1 = gd_add_spec(D, "data RAW FLOAT32 1", 0);
   CHECKI(e1, 0);
 
-  e2 = gd_putdata(D, "data", 0, 0, 0, 8, GD_FLOAT32, data_in);
-  CHECKI(e2, 8);
+  e2 = gd_alter_chunk_size(D, ENC_CHUNK_SIZE, 0);
+  CHECKI(e2, 0);
 
-  e3 = gd_getdata(D, "data", 0, 0, 0, 8, GD_FLOAT32, data_out);
+  e3 = gd_putdata(D, "data", 0, 0, 0, 8, GD_FLOAT32, data_in);
   CHECKI(e3, 8);
+
+  e4 = gd_getdata(D, "data", 0, 0, 0, 8, GD_FLOAT32, data_out);
+  CHECKI(e4, 8);
 
   gd_discard(D);
 
   /* Can't check NAN against itself */
   CHECKNAN(data_out[0]);
 
-  if (e3 > 8)
-    e3 = 8;
-  for (i = 1; i < e3; ++i)
+  if (e4 > 8)
+    e4 = 8;
+  for (i = 1; i < e4; ++i)
     CHECKFi(i, data_out[i], data_in[i]);
 
-  unlink(format1);
-  unlink(format);
-  unlink(data);
-  rmdir(filedir);
+  rmdirfile();
 
   return r;
 #endif

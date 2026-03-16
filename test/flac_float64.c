@@ -26,5 +26,6 @@
 
 #define ENC_SUFFIX ".flac"
 #define GD_ENC_ENCODED GD_FLAC_ENCODED
+#define ENC_CHUNK_SIZE 0
 
 #include "enc_float64.c"

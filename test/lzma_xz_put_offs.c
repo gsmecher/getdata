@@ -27,5 +27,6 @@
 
 #define ENC_SUFFIX ".xz"
 #define ENC_ENCODED GD_LZMA_ENCODED
+#define ENC_CHUNK_SIZE 0
 
 #include "enc_put_offs.c"

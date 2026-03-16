@@ -557,7 +557,20 @@ ZSTD_TESTS=zstd_add zstd_complex64 zstd_complex128 zstd_del zstd_enoent \
 					 zstd_put_sub zstd_seek zstd_seek_far zstd_seek_put zstd_sync \
 					 zstd_uint8 zstd_uint16 zstd_uint32 zstd_uint64 \
 					 zstd_chunk_put_get zstd_chunk_nframes zstd_chunk_boundary \
-					 zstd_chunk_backward zstd_chunk_stress
+					 zstd_chunk_backward zstd_chunk_stress \
+					 zstd_chunk_int8 zstd_chunk_int16 zstd_chunk_int32 \
+					 zstd_chunk_int64 zstd_chunk_uint8 zstd_chunk_uint16 \
+					 zstd_chunk_uint32 zstd_chunk_uint64 \
+					 zstd_chunk_float32 zstd_chunk_float64 \
+					 zstd_chunk_complex64 zstd_chunk_complex128 \
+					 zstd_chunk_put_offs
+
+GZIP_CHUNK_TESTS=gzip_chunk_int8 gzip_chunk_int16 gzip_chunk_int32 \
+					 gzip_chunk_int64 gzip_chunk_uint8 gzip_chunk_uint16 \
+					 gzip_chunk_uint32 gzip_chunk_uint64 \
+					 gzip_chunk_float32 gzip_chunk_float64 \
+					 gzip_chunk_complex64 gzip_chunk_complex128 \
+					 gzip_chunk_put_offs
 
 ZZIP_TESTS=zzip_data zzip_get zzip_get_get zzip_nframes zzip_seek zzip_seek_far
 
@@ -580,7 +593,8 @@ TESTS=$(ADD_TESTS)      $(ALIAS_TESTS)    $(ALLOC_TESTS)    $(ALTER_TESTS)    \
 			$(SIE_TESTS)      $(SLIM_TESTS)     $(SPF_TESTS)      $(SVLIST_TESTS)   \
 			$(TABLE_TESTS)    $(TELL_TESTS)     $(TOK_TESTS)      $(TRUNC_TESTS)    \
 			$(UNCLUDE_TESTS)  $(VALID_TESTS)    $(VERSION_TESTS)  $(VLIST_TESTS)    \
-			$(ZSTD_TESTS)     $(ZZIP_TESTS)     $(ZZSLIM_TESTS)
+			$(ZSTD_TESTS)     $(ZZIP_TESTS)     $(ZZSLIM_TESTS)   \
+			$(GZIP_CHUNK_TESTS)
 
 check_PROGRAMS=$(TESTS)
 

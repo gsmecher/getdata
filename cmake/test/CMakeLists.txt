@@ -66,7 +66,11 @@ if(NOT ZLIB_FOUND OR NOT GZIP)
     gzip_move_to gzip_nframes gzip_put gzip_put_back gzip_put_endian gzip_put_get
     gzip_put_nframes gzip_put_off gzip_put_offs gzip_put_pad gzip_put_sub
     gzip_seek gzip_seek_far gzip_seek_put gzip_sync gzip_uint16 gzip_uint32
-    gzip_uint64 gzip_uint8)
+    gzip_uint64 gzip_uint8
+    gzip_chunk_int8 gzip_chunk_int16 gzip_chunk_int32 gzip_chunk_int64
+    gzip_chunk_uint8 gzip_chunk_uint16 gzip_chunk_uint32 gzip_chunk_uint64
+    gzip_chunk_float32 gzip_chunk_float64 gzip_chunk_complex64
+    gzip_chunk_complex128 gzip_chunk_put_offs)
 endif()
 
 if(NOT FLAC_FOUND OR NOT FLAC)
@@ -102,7 +106,11 @@ if(NOT ZSTD_FOUND OR NOT ZSTD)
     zstd_seek zstd_seek_far zstd_seek_put zstd_sync
     zstd_uint16 zstd_uint32 zstd_uint64 zstd_uint8
     zstd_chunk_backward zstd_chunk_boundary zstd_chunk_nframes
-    zstd_chunk_put_get zstd_chunk_stress)
+    zstd_chunk_put_get zstd_chunk_stress
+    zstd_chunk_int8 zstd_chunk_int16 zstd_chunk_int32 zstd_chunk_int64
+    zstd_chunk_uint8 zstd_chunk_uint16 zstd_chunk_uint32 zstd_chunk_uint64
+    zstd_chunk_float32 zstd_chunk_float64 zstd_chunk_complex64
+    zstd_chunk_complex128 zstd_chunk_put_offs)
 endif()
 
 if(NOT ZZIP_FOUND OR NOT ZIP OR NOT UNZIP)

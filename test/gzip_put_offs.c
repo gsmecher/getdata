@@ -27,5 +27,6 @@
 
 #define ENC_SUFFIX ".gz"
 #define ENC_ENCODED GD_GZIP_ENCODED
+#define ENC_CHUNK_SIZE 0
 
 #include "enc_put_offs.c"

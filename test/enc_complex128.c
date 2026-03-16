@@ -26,10 +26,7 @@ int main(void)
   return 77;
 #else
   const char *filedir = "dirfile";
-  const char *format = "dirfile/format";
-  const char *format1 = "dirfile/format1";
-  const char *data = "dirfile/data" ENC_SUFFIX;
-  int e1, e2, e3, r = 0;
+  int e1, e2, e3, e4, r = 0;
   DIRFILE *D;
   const double data_in[8] = { NAN, 3.3, 0, -1, -INFINITY, 4.3, 93.3, 8 };
   double data_out[8];
@@ -43,26 +40,26 @@ int main(void)
   e1 = gd_add_spec(D, "data RAW COMPLEX128 1", 0);
   CHECKI(e1, 0);
 
-  e2 = gd_putdata(D, "data", 0, 0, 0, 4, GD_COMPLEX128, data_in);
-  CHECKI(e2, 4);
+  e2 = gd_alter_chunk_size(D, ENC_CHUNK_SIZE, 0);
+  CHECKI(e2, 0);
 
-  e3 = gd_getdata(D, "data", 0, 0, 0, 4, GD_COMPLEX128, data_out);
+  e3 = gd_putdata(D, "data", 0, 0, 0, 4, GD_COMPLEX128, data_in);
   CHECKI(e3, 4);
+
+  e4 = gd_getdata(D, "data", 0, 0, 0, 4, GD_COMPLEX128, data_out);
+  CHECKI(e4, 4);
 
   gd_discard(D);
 
   /* Can't check NAN against itself */
   CHECKNAN(data_out[0]);
 
-  if (e3 > 4)
-    e3 = 4;
-  for (i = 1; i < 2 * e3; ++i)
+  if (e4 > 4)
+    e4 = 4;
+  for (i = 1; i < 2 * e4; ++i)
     CHECKFi(i, data_out[i], data_in[i]);
 
-  unlink(format1);
-  unlink(format);
-  unlink(data);
-  rmdir(filedir);
+  rmdirfile();
 
   return r;
 #endif
