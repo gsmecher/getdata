@@ -26,5 +26,6 @@
 
 #define ENC_SUFFIX ".xz"
 #define GD_ENC_ENCODED GD_LZMA_ENCODED
+#define ENC_CHUNK_SIZE 0
 
 #include "enc_uint64.c"

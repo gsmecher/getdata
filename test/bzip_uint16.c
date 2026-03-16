@@ -26,5 +26,6 @@
 
 #define ENC_SUFFIX ".bz2"
 #define GD_ENC_ENCODED GD_BZIP2_ENCODED
+#define ENC_CHUNK_SIZE 0
 
 #include "enc_uint16.c"

@@ -24,7 +24,6 @@ int main(void)
   return 77;
 #else
   const char *filedir = "dirfile";
-  const char *format = "dirfile/format";
   const char *data = "dirfile/data" ENC_SUFFIX;
   uint32_t c;
   uint32_t d[100];
@@ -43,6 +42,10 @@ int main(void)
   D = gd_open(filedir, GD_RDWR | ENC_ENCODED | GD_LITTLE_ENDIAN
       | GD_VERBOSE | GD_CREAT | GD_EXCL);
   gd_add_spec(D, "data RAW UINT32 1", 0);
+
+  e = gd_alter_chunk_size(D, ENC_CHUNK_SIZE, 0);
+  CHECKI(e, 0);
+
   for (i = 0; i < NI; ++i) {
     c = offs[i];
     n1 = gd_putdata(D, "data", offs[i], 0, 0, 1, GD_UINT32, &c);
@@ -81,9 +84,7 @@ int main(void)
 
   gd_discard(D);
 
-  unlink(data);
-  unlink(format);
-  rmdir(filedir);
+  rmdirfile();
 
   return r;
 #endif

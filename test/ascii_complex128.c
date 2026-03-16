@@ -22,5 +22,6 @@
 
 #define ENC_SUFFIX ".txt"
 #define GD_ENC_ENCODED GD_TEXT_ENCODED
+#define ENC_CHUNK_SIZE 0
 
 #include "enc_complex64.c"
