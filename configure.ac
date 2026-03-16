@@ -835,7 +835,7 @@ AC_CHECK_FUNCS([basename _chsize _chsize_s _commit dup2 fchmod _fdopen \
                 fdopendir _finite fseeko fseeko64 _fstat fstat64 \
                 _fstat64 fstatat fstatat64 fsync ftello ftello64 ftruncate \
                 ftruncate64 getcwd _getcwd getdelim gmtime_r kill isnan _isnan \
-                lseek64 _lseeki64 lstat lstat64 _mkdir nan _open openat \
+                lseek64 _lseeki64 lstat lstat64 _mkdir mkdirat nan _open openat \
                 pcre_compile pipe _read readdir_r readlink regcomp \
                 renameat _rmdir setrlimit snprintf _snprintf stat64 _stat64 \
                 _strtoi64 strtoll strtoq _strtoui64 strtoull strtouq symlink \

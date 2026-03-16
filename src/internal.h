@@ -716,6 +716,12 @@ int gd_RenameAt(const DIRFILE *D, int, const char*, int, const char*);
 int gd_UnlinkAt(const DIRFILE*, int, const char*, int);
 #endif
 
+#ifdef HAVE_MKDIRAT
+# define gd_MkdirAt(d,...) mkdirat(__VA_ARGS__)
+#else
+int gd_MkdirAt(const DIRFILE*, int, const char*, mode_t);
+#endif
+
 #if defined HAVE_STERROR_R && ! defined HAVE_DECL_STRERROR_R
 # if ! HAVE_DECL_STRERROR_R
 char* strerror_r(int, char*, size_t);
