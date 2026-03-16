@@ -152,6 +152,23 @@ int gd_UnlinkAt(const DIRFILE *D, int dirfd, const char *name,
 }
 #endif
 
+#ifndef HAVE_MKDIRAT
+int gd_MkdirAt(const DIRFILE *D, int dirfd, const char *name, mode_t mode)
+{
+  int ret;
+  char *path;
+
+  dtrace("%p, %i, \"%s\", 0%o", D, dirfd, name, mode);
+
+  path = _GD_MakeFullPathOnly(D, dirfd, name);
+  ret = mkdir(path, mode);
+  free(path);
+
+  dreturn("%i", ret);
+  return ret;
+}
+#endif
+
 /* Non-threadsafe version of strerror_r */
 #ifndef HAVE_STRERROR_R
 int strerror_r(int errnum, char *buf, size_t buflen)

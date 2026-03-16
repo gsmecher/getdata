@@ -77,6 +77,7 @@
 #cmakedefine HAVE_LSEEK64 1
 #cmakedefine HAVE_LSTAT 1
 #cmakedefine HAVE_NAN 1
+#cmakedefine HAVE_MKDIRAT 1
 #cmakedefine HAVE_OPENAT 1
 #cmakedefine HAVE_READDIR_R 1
 #cmakedefine HAVE_READLINK 1
