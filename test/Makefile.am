@@ -497,6 +497,8 @@ PUT_TESTS=put64 put_bad_code put_bit put_bit_repr put_bof put_carray \
 REF_TESTS=ref ref_empty ref_get ref_none ref_set ref_set_code ref_set_prot \
 					ref_set_rdonly ref_set_type ref_two
 
+EXPIRE_TESTS=expire expire_boundary expire_nochunk expire_rdonly expire_read
+
 REPR_TESTS=repr_a repr_bad repr_float32 repr_float64 repr_i repr_int16 \
 					 repr_int32 repr_int64 repr_int8 repr_m repr_r repr_real_a \
 					 repr_real_i repr_real_m repr_real_r repr_uint16 repr_uint32 \
@@ -597,7 +599,7 @@ TESTS=$(ADD_TESTS)      $(ALIAS_TESTS)    $(ALLOC_TESTS)    $(ALTER_TESTS)    \
 			$(TABLE_TESTS)    $(TELL_TESTS)     $(TOK_TESTS)      $(TRUNC_TESTS)    \
 			$(UNCLUDE_TESTS)  $(VALID_TESTS)    $(VERSION_TESTS)  $(VLIST_TESTS)    \
 			$(ZSTD_TESTS)     $(ZZIP_TESTS)     $(ZZSLIM_TESTS)   \
-			$(CHUNK_TESTS)    $(GZIP_CHUNK_TESTS)
+			$(CHUNK_TESTS)    $(EXPIRE_TESTS)   $(GZIP_CHUNK_TESTS)
 
 check_PROGRAMS=$(TESTS)
 
