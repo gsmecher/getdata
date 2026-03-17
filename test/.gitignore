@@ -557,6 +557,11 @@ error_num
 error_short
 error_verbose
 error_verbose_prefix
+expire
+expire_boundary
+expire_nochunk
+expire_rdonly
+expire_read
 file
 file_code
 file_type
