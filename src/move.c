@@ -76,7 +76,7 @@ static void _GD_CleanupTempDir(DIRFILE *D, gd_entry_t *E, int tmp_dirfd,
     }
   }
 
-  close(tmp_dirfd);
+  _GD_ReleaseDir(D, tmp_dirfd);
   rmdir(tmp_path);
 }
 
@@ -211,7 +211,11 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
     return -1;
   }
 
-  tmp_dirfd = gd_OpenAt(D, dst_dirfd, tmp_dirname, O_RDONLY, 0);
+  /* Register the temp directory in D->dir[] and get a dirfd for it.  We
+   * avoid gd_OpenAt here because on platforms where open() refuses
+   * directories (e.g. MSVCRT) there's nothing to open -- the dirfd is just
+   * an index into the directory cache. */
+  tmp_dirfd = _GD_GrabDir(D, dst_dirfd, tmp_dirname);
   if (tmp_dirfd < 0) {
     _GD_SetError(D, GD_E_IO, GD_E_IO_OPEN, tmp_path, 0, NULL);
     rmdir(tmp_path);
@@ -224,7 +228,7 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
   buf_samples = GD_BUFFER_SIZE / E->e->u.raw.size;
   buf = _GD_Malloc(D, GD_BUFFER_SIZE);
   if (buf == NULL) {
-    close(tmp_dirfd);
+    _GD_ReleaseDir(D, tmp_dirfd);
     rmdir(tmp_path);
     free(tmp_path);
     dreturn("%i", -1);
@@ -419,7 +423,7 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
   if (new_chunk_size > 0) {
     if (gd_RenameAt(D, tmp_dirfd, new_filebase, dst_dirfd, new_filebase)) {
       _GD_SetError(D, GD_E_IO, GD_E_IO_RENAME, new_filebase, 0, NULL);
-      close(tmp_dirfd);
+      _GD_ReleaseDir(D, tmp_dirfd);
       free(tmp_path);
       _GD_ResetRawIO(E);
       dreturn("%i", -1);
@@ -432,7 +436,7 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
     new_file.subenc = subencoding;
     if ((*_GD_ef[subencoding].name)(D, NULL, &new_file, new_filebase, 0, 0))
     {
-      close(tmp_dirfd);
+      _GD_ReleaseDir(D, tmp_dirfd);
       free(tmp_path);
       _GD_ResetRawIO(E);
       dreturn("%i", -1);
@@ -441,7 +445,7 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
     if (gd_RenameAt(D, tmp_dirfd, new_file.name, dst_dirfd, new_file.name)) {
       _GD_SetError(D, GD_E_IO, GD_E_IO_RENAME, new_file.name, 0, NULL);
       free(new_file.name);
-      close(tmp_dirfd);
+      _GD_ReleaseDir(D, tmp_dirfd);
       free(tmp_path);
       _GD_ResetRawIO(E);
       dreturn("%i", -1);
@@ -450,7 +454,7 @@ int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
     free(new_file.name);
   }
 
-  close(tmp_dirfd);
+  _GD_ReleaseDir(D, tmp_dirfd);
   rmdir(tmp_path);
   free(tmp_path);
   _GD_ResetRawIO(E);

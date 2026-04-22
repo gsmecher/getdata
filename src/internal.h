@@ -1430,7 +1430,7 @@ int _GD_GetRepr(const char *restrict, size_t *restrict);
 int _GD_GetScalar(DIRFILE *restrict, const char *restrict, int*, gd_type_t,
    void *restrict, gd_entry_t*);
 unsigned int _GD_GetSPF(DIRFILE*, gd_entry_t*);
-int _GD_GrabDir(DIRFILE*, int, const char *restrict, int);
+int _GD_GrabDir(DIRFILE*, int, const char *restrict);
 int _GD_Include(DIRFILE*, struct parser_state *restrict, const char *restrict,
     char **restrict, int, const char *restrict, const char *restrict, int);
 void _GD_InitialiseFramework(void);
