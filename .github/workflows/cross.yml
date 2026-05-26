@@ -1,0 +1,87 @@
+name: Cross-platform
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  qemu:
+    name: Linux on ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: s390x        # big-endian — exercises WORDS_BIGENDIAN in src/endian.c
+            distro: ubuntu_latest
+          - arch: ppc64le      # different alignment/atomics
+            distro: ubuntu_latest
+          - arch: armv7        # 32-bit arm — catches off_t/size_t assumptions
+            distro: ubuntu_latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: uraimo/run-on-arch-action@v3
+        with:
+          arch: ${{ matrix.arch }}
+          distro: ${{ matrix.distro }}
+          githubToken: ${{ github.token }}
+          install: |
+            apt-get update
+            apt-get install -y          \
+                autoconf                \
+                automake                \
+                libtool                 \
+                build-essential         \
+                libltdl-dev             \
+                liblzma-dev             \
+                libflac-dev             \
+                libpcre2-dev            \
+                libzstd-dev             \
+                pkg-config
+          run: |
+            autoreconf -i
+            ./configure --disable-php --without-python \
+                --with-ltdl=/usr        \
+                --with-liblzma=/usr     \
+                --with-libFLAC=/usr     \
+                --with-pcre=/usr
+            make -j$(nproc)
+            make check
+
+  freebsd:
+    name: FreeBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build and test in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: '14.2'
+          usesh: true
+          prepare: |
+            pkg install -y       \
+                autoconf         \
+                automake         \
+                libtool          \
+                gmake            \
+                pkgconf          \
+                libltdl          \
+                xz               \
+                flac             \
+                pcre2            \
+                zstd
+          run: |
+            autoreconf -i
+            ./configure --disable-php --without-python \
+                --with-ltdl=/usr/local        \
+                --with-liblzma=/usr           \
+                --with-libFLAC=/usr/local     \
+                --with-pcre=/usr/local
+            gmake -j$(sysctl -n hw.ncpu)
+            gmake check
