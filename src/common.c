@@ -307,8 +307,15 @@ int _GD_SetTablePath(DIRFILE *restrict D, const gd_entry_t *restrict E,
 
   dtrace("%p, %p, %p", D, E, e);
 
+  /* dirname() may modify its argument, so work on a copy */
+  temp_buffer = _GD_Strdup(D, E->EN(linterp,table));
+  if (temp_buffer == NULL) {
+    dreturn("%i", 1);
+    return 1;
+  }
   e->u.linterp.table_dirfd = _GD_GrabDir(D,
-      D->fragment[E->fragment_index].dirfd, E->EN(linterp,table), 0);
+      D->fragment[E->fragment_index].dirfd, dirname(temp_buffer));
+  free(temp_buffer);
   if (e->u.linterp.table_dirfd < 0 && D->error == GD_E_OK)
     _GD_SetError(D, GD_E_IO, GD_E_IO_OPEN, E->EN(linterp,table), 0, NULL);
   if (D->error) {
@@ -1364,30 +1371,32 @@ char *_GD_MakeFullPathOnly(const DIRFILE *D, int dirfd, const char *name)
   return filepath;
 }
 
-int _GD_GrabDir(DIRFILE *D, int dirfd, const char *name, int canonical)
+/* Register a directory in D->dir[], returning its dirfd (an index into the
+ * table on platforms without openat(), a real fd otherwise).  If the
+ * directory is already registered its refcount is bumped and the existing
+ * dirfd returned.
+ *
+ * parent_dirfd is the dirfd of the parent directory, used to resolve name
+ * if it isn't absolute.  name is the path to the directory itself (not a
+ * file within it); callers with a file path should dirname() it first. */
+int _GD_GrabDir(DIRFILE *D, int parent_dirfd, const char *name)
 {
   unsigned int i;
-  char *path, *dir = NULL;
   void *ptr;
+  char *full;
 
-  dtrace("%p, %i, \"%s\", %i", D, dirfd, name, canonical);
+  dtrace("%p, %i, \"%s\"", D, parent_dirfd, name);
 
-  if (canonical)
-    path = _GD_Strdup(D, name);
-  else
-    path = _GD_MakeFullPath(D, dirfd, name, 1);
-
-  if (path == NULL) {
+  full = _GD_MakeFullPath(D, parent_dirfd, name, 1);
+  if (full == NULL) {
     dreturn("%i", -1);
     return -1;
   }
 
-  dir = dirname(path);
-
   for (i = 0; i < D->ndir; ++i)
-    if (strcmp(dir, D->dir[i].path) == 0) {
+    if (strcmp(full, D->dir[i].path) == 0) {
       D->dir[i].rc++;
-      free(path);
+      free(full);
       dreturn("%i", D->dir[i].fd);
       return D->dir[i].fd;
     }
@@ -1396,38 +1405,23 @@ int _GD_GrabDir(DIRFILE *D, int dirfd, const char *name, int canonical)
   ptr = _GD_Realloc(D, D->dir, sizeof(D->dir[0]) * (D->ndir + 1));
 
   if (ptr == NULL) {
-    free(path);
+    free(full);
     dreturn("%i", -1);
     return -1;
   }
 
   D->dir = ptr;
   D->dir[D->ndir].rc = 1;
-  D->dir[D->ndir].path = _GD_Strdup(D, dir);
-
-  if (D->dir[D->ndir].path == NULL) {
-    free(path);
-    dreturn("%i", -1);
-    return -1;
-  }
+  D->dir[D->ndir].path = full;
 
 #ifdef GD_NO_DIR_OPEN
   D->dir[D->ndir].fd = D->ndir;
-  free(path);
 #else
   if (_GD_AbsPath(name)) {
-    D->dir[D->ndir].fd = open(dir, O_RDONLY);
+    D->dir[D->ndir].fd = open(full, O_RDONLY);
   } else {
-    free(path);
-    path = _GD_Strdup(D, name);
-    if (path == NULL) {
-      free(D->dir[D->ndir].path);
-      dreturn("%i", -1);
-      return -1;
-    }
-    D->dir[D->ndir].fd = gd_OpenAt(D, dirfd, dirname(path), O_RDONLY, 0666);
+    D->dir[D->ndir].fd = gd_OpenAt(D, parent_dirfd, name, O_RDONLY, 0666);
   }
-  free(path);
 
   if (D->dir[D->ndir].fd == -1) {
     free(D->dir[D->ndir].path);

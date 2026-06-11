@@ -252,7 +252,7 @@ int _GD_Include(DIRFILE *D, struct parser_state *p, const char *ename,
     goto include_error;
 
   /* Open the containing directory */
-  dirfd = _GD_GrabDir(D, D->fragment[parent].dirfd, temp_buf1, 1);
+  dirfd = _GD_GrabDir(D, D->fragment[parent].dirfd, sname);
   if (dirfd == -1 && D->error == GD_E_OK)
     _GD_SetError(D, GD_E_IO, GD_E_IO_INCL, p->file, p->line, ename);
   if (D->error)
