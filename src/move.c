@@ -20,273 +20,407 @@
  */
 #include "internal.h"
 
-int _GD_MogrifyFile(DIRFILE* D, gd_entry_t* E, unsigned long encoding,
-    unsigned long byte_sex, off64_t offset, int finalise, int new_fragment,
-    char* new_filebase)
+/* Reset all cached I/O state for a RAW entry. */
+static void _GD_ResetRawIO(gd_entry_t *E)
 {
-  const struct encoding_t* enc_in;
-  const struct encoding_t* enc_out;
-  const size_t ns = GD_BUFFER_SIZE / E->e->u.raw.size;
-  ssize_t nread, nwrote;
-  int subencoding = GD_ENC_UNKNOWN;
-  int i, ef_swap;
-  int arm_fix = 0, endian_fix = 0;
-  void *buffer;
+  free(E->e->u.raw.file[0].name);
+  E->e->u.raw.file[0].name = NULL;
+  E->e->u.raw.file[0].subenc = GD_ENC_UNKNOWN;
+  E->e->u.raw.file[0].mode = 0;
+}
 
-  dtrace("%p, %p, %lu, %lu, %" PRId64 ", %i, %i, %p", D, E, encoding, byte_sex,
-      (int64_t)offset, finalise, new_fragment, new_filebase);
+/* Remove all files created in tmp_dirfd for fieldbase, then rmdir
+ * tmp_path.  Used for rollback on error. */
+static void _GD_CleanupTempDir(DIRFILE *D, int tmp_dirfd,
+    const char *tmp_path, const char *fieldbase)
+{
+  struct gd_raw_file_ probe;
+  int i;
 
-  if (new_fragment == -1)
-    new_fragment = E->fragment_index;
-
-  if (new_filebase == NULL) {
-    new_filebase = _GD_Strdup(D, E->e->u.raw.filebase);
-    if (new_filebase == NULL) {
-      dreturn("%i", -1);
-      return -1;
+  /* Remove encoded flat file for each known subencoding */
+  memset(&probe, 0, sizeof(probe));
+  probe.D = D;
+  probe.idata = -1;
+  for (i = 0; _GD_ef[i].scheme != GD_ENC_UNSUPPORTED; i++) {
+    if (_GD_MissingFramework(i, GD_EF_NAME | GD_EF_UNLINK))
+      continue;
+    probe.subenc = i;
+    if (!(*_GD_ef[i].name)(D, NULL, &probe, fieldbase, 0, 0)) {
+      gd_UnlinkAt(D, tmp_dirfd, probe.name, 0);
+      free(probe.name);
+      probe.name = NULL;
     }
   }
 
-  offset -= D->fragment[E->fragment_index].frame_offset;
+  _GD_ReleaseDir(D, tmp_dirfd);
+  rmdir(tmp_path);
+}
 
-  /* Figure out the new subencoding scheme */
-  if (encoding == D->fragment[E->fragment_index].encoding &&
-      E->e->u.raw.file[0].subenc != GD_ENC_UNKNOWN)
+/* _GD_TransformField: stream a RAW field's data from its current layout to a
+ * new layout (encoding, byte_sex, frame_offset).  Reads via the normal read
+ * path and writes to a temp directory, then commits on success.
+ *
+ * new_fragment identifies the destination fragment (for dirfd and protection).
+ * new_filebase is the destination filebase; NULL means keep the existing one.
+ *
+ * Returns 0 on success, -1 on failure (D->error set). */
+int _GD_TransformField(DIRFILE *D, gd_entry_t *E, unsigned long new_encoding,
+    unsigned long new_byte_sex, off64_t new_frame_offset,
+    int new_fragment, const char *new_filebase)
+{
+  int frag = E->fragment_index;
+  int src_dirfd = D->fragment[frag].dirfd;
+  int dst_dirfd = D->fragment[new_fragment].dirfd;
+  int tmp_dirfd;
+  int is_index;
+  int subencoding;
+  int i;
+  int saved_subenc;
+  int oop, swap, target_open;
+  off64_t eof_samples, bof, new_bof, pos, target_pos;
+  size_t buf_samples, n;
+  ssize_t nread;
+  void *buf;
+  char tmp_dirname[32];
+  char *tmp_path;
+  const struct encoding_t *write_enc;
+  struct gd_raw_file_ target_file;
+  struct gd_raw_file_ new_file;
+
+  dtrace("%p, %p, %lu, %lu, %" PRId64 ", %i, \"%s\"",
+      D, E, new_encoding, new_byte_sex, (int64_t)new_frame_offset,
+      new_fragment, new_filebase);
+
+  if (new_filebase == NULL)
+    new_filebase = E->e->u.raw.filebase;
+
+  /* Check input encoding supports read; also resolves file[0].subenc and
+   * D->fragment[frag].encoding (from GD_AUTO_ENCODED to the actual scheme). */
+  if (!_GD_Supports(D, E, GD_EF_NAME | GD_EF_OPEN | GD_EF_CLOSE |
+        GD_EF_SEEK | GD_EF_READ | GD_EF_UNLINK))
   {
-    subencoding = E->e->u.raw.file[0].subenc;
-  } else
-    for (i = 0; _GD_ef[i].scheme != GD_ENC_UNSUPPORTED; i++) {
-      if (_GD_ef[i].scheme == encoding) {
-        subencoding = i;
-        break;
-      }
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  /* If the caller passed the fragment's encoding as new_encoding and it was
+   * GD_AUTO_ENCODED at call time, _GD_Supports has now resolved it; use the
+   * resolved value. */
+  if (new_encoding == GD_AUTO_ENCODED)
+    new_encoding = D->fragment[frag].encoding;
+
+  /* Find the output subencoding index by scheme.  Always scan _GD_ef rather
+   * than reusing file[0].subenc: source and output subencodings are distinct
+   * and may differ (e.g. when re-encoding). */
+  subencoding = GD_ENC_UNKNOWN;
+  for (i = 0; _GD_ef[i].scheme != GD_ENC_UNSUPPORTED; i++) {
+    if (_GD_ef[i].scheme == new_encoding) {
+      subencoding = i;
+      break;
     }
+  }
 
   if (subencoding == GD_ENC_UNKNOWN) {
     _GD_SetError(D, GD_E_UNKNOWN_ENCODING, GD_E_UNENC_TARGET, NULL, 0, NULL);
-    free(new_filebase);
     dreturn("%i", -1);
     return -1;
   }
 
-  enc_out = _GD_ef + subencoding;
-
-  /* Check output encoding */
-  if (_GD_MissingFramework(subencoding, GD_EF_CLOSE | GD_EF_SEEK | GD_EF_WRITE |
-        GD_EF_SYNC))
+  /* Check output encoding supports write */
+  if (_GD_MissingFramework(subencoding,
+        GD_EF_CLOSE | GD_EF_SEEK | GD_EF_WRITE | GD_EF_SYNC))
   {
     _GD_SetError(D, GD_E_UNSUPPORTED, 0, NULL, 0, NULL);
-    free(new_filebase);
     dreturn("%i", -1);
     return -1;
   }
 
-  /* input encoding check */
-  if (!_GD_Supports(D, E, GD_EF_NAME | GD_EF_OPEN | GD_EF_CLOSE | GD_EF_SEEK |
-        GD_EF_READ | GD_EF_UNLINK))
+  /* Check data protection */
+  if (D->fragment[frag].protection & GD_PROTECT_DATA ||
+      D->fragment[new_fragment].protection & GD_PROTECT_DATA)
   {
-    free(new_filebase);
+    _GD_SetError(D, GD_E_PROTECTED, GD_E_PROTECTED_DATA, NULL, 0,
+        D->fragment[frag].cname);
     dreturn("%i", -1);
     return -1;
   }
 
-  enc_in = _GD_ef + E->e->u.raw.file[0].subenc;
-
-  /* if neither encoding scheme does internal byte swapping, and the data
-   * type can't be endianness swapped, sex differences can't matter */
-  if (GD_SIZE(E->e->u.raw.size) != 1 || (enc_in->flags & GD_EF_SWAP) ||
-      (enc_out->flags & GD_EF_SWAP))
+  /* No-op: nothing changing */
+  if (new_frame_offset == D->fragment[frag].frame_offset &&
+      new_encoding == D->fragment[frag].encoding &&
+      new_byte_sex == D->fragment[frag].byte_sex &&
+      strcmp(new_filebase, E->e->u.raw.filebase) == 0 &&
+      dst_dirfd == src_dirfd)
   {
-    /* figure out whether endianness correction is required */
-    if ((enc_in->flags & GD_EF_ECOR) || (enc_in->flags & GD_EF_ECOR)) {
-      unsigned in_sex = D->fragment[E->fragment_index].byte_sex;
-      unsigned out_sex = byte_sex;
-
-      /* fix endian flags for encoding behaviour */
-      if (!(enc_in->flags & (GD_EF_SWAP | GD_EF_ECOR))) {
-        in_sex = (in_sex & ~(GD_LITTLE_ENDIAN | GD_BIG_ENDIAN)) |
-          (out_sex & (GD_LITTLE_ENDIAN | GD_BIG_ENDIAN));
-        if (!(enc_in->flags & GD_EF_ECOR))
-          in_sex = (in_sex & ~GD_ARM_FLAG) | (out_sex & GD_ARM_FLAG);
-      }
-
-      if (!(enc_out->flags & (GD_EF_SWAP | GD_EF_ECOR))) {
-        out_sex = (out_sex & ~(GD_LITTLE_ENDIAN | GD_BIG_ENDIAN)) |
-          (in_sex & (GD_LITTLE_ENDIAN | GD_BIG_ENDIAN));
-        if (!(enc_out->flags & GD_EF_ECOR))
-          out_sex = (out_sex & ~GD_ARM_FLAG) | (in_sex | GD_ARM_FLAG);
-      }
-
-      endian_fix = _GD_CheckByteSex(E->EN(raw,data_type), in_sex, out_sex, 0,
-          &arm_fix);
-    }
-  }
-
-  /* If all that's changing is the byte sex, but we don't need to do
-   * endianness conversion, don't do anything */
-  if (offset == 0 && encoding == D->fragment[E->fragment_index].encoding &&
-      !endian_fix && !arm_fix && strcmp(new_filebase, E->e->u.raw.filebase) == 0
-      && D->fragment[new_fragment].dirfd ==
-      D->fragment[E->fragment_index].dirfd)
-  {
-    free(new_filebase);
     dreturn("%i", 0);
     return 0;
   }
 
-  /* check data protection */
-  if (D->fragment[E->fragment_index].protection & GD_PROTECT_DATA ||
-      D->fragment[new_fragment].protection & GD_PROTECT_DATA)
-  {
-    _GD_SetError(D, GD_E_PROTECTED, GD_E_PROTECTED_DATA, NULL, 0,
-        D->fragment[E->fragment_index].cname);
-    free(new_filebase);
+  /* Close any open handles before streaming */
+  _GD_FiniRawIO(D, E, frag, GD_FINIRAW_KEEP);
+
+  /* Determine data range under current layout */
+  is_index = 0;
+  eof_samples = _GD_GetEOF(D, E, E->field, &is_index);
+  bof = D->fragment[frag].frame_offset * E->EN(raw,spf);
+
+  if (D->error || eof_samples <= bof) {
+    /* Empty field -- no data to stream */
+    D->error = GD_E_OK;
+    dreturn("%i", 0);
+    return 0;
+  }
+
+  /* Create a temp directory in the destination fragment's directory. */
+  strcpy(tmp_dirname, "_xfrm_XXXXXX");
+  if (_GD_MakeTempDir(D, dst_dirfd, tmp_dirname)) {
+    _GD_SetError(D, GD_E_IO, GD_E_IO_OPEN, NULL, 0, NULL);
     dreturn("%i", -1);
     return -1;
   }
 
-  /* Open the input file, if necessary */
-  if (_GD_InitRawIO(D, E, NULL, -1, NULL, 0, GD_FILE_READ,
-        _GD_FileSwapBytes(D, E)))
-  {
-    free(new_filebase);
+  tmp_path = _GD_MakeFullPath(D, dst_dirfd, tmp_dirname, 0);
+  if (tmp_path == NULL) {
     dreturn("%i", -1);
     return -1;
   }
 
-  /* set ef_swap, the output encoding in-framework endian correction flag */
-  ef_swap = _GD_CheckByteSex(E->EN(raw,data_type), byte_sex, 0, 0, NULL);
-
-  /* Create the output file and open it. If we're changing encodings, we
-   * could write to the new file directly.  However, we use a temporary file
-   * anyway just to keep things clean. */
-  E->e->u.raw.file[1].subenc = subencoding;
-
-  if (_GD_InitRawIO(D, E, new_filebase, new_fragment, enc_out, 0,
-        GD_FILE_WRITE | GD_FILE_TEMP, ef_swap))
-  {
-    free(new_filebase);
+  /* Register the temp directory in D->dir[] and get a dirfd for it.  We
+   * avoid gd_OpenAt here because on platforms where open() refuses
+   * directories (e.g. MSVCRT) there's nothing to open -- the dirfd is just
+   * an index into the directory cache. */
+  tmp_dirfd = _GD_GrabDir(D, dst_dirfd, tmp_dirname);
+  if (tmp_dirfd < 0) {
+    _GD_SetError(D, GD_E_IO, GD_E_IO_OPEN, tmp_path, 0, NULL);
+    rmdir(tmp_path);
+    free(tmp_path);
     dreturn("%i", -1);
     return -1;
   }
 
-  /* Adjust for the change in offset */
-  if (offset < 0) { /* new offset is less, pad new file */
-    if ((*enc_in->seek)(E->e->u.raw.file, 0, E->EN(raw,data_type),
-          GD_FILE_WRITE) == -1)
-    {
-      _GD_SetEncIOError(D, GD_E_IO_WRITE, E->e->u.raw.file + 0);
-    } else
-      _GD_DoSeek(D, E, enc_out, -offset * E->EN(raw,spf), GD_FILE_WRITE
-          | GD_FILE_TEMP);
-  } else { /* new offset is more, truncate old file */
-    if ((*enc_in->seek)(E->e->u.raw.file, offset * E->EN(raw,spf),
-          E->EN(raw,data_type), GD_FILE_READ) == -1)
-    {
-      _GD_SetEncIOError(D, GD_E_IO_WRITE, E->e->u.raw.file + 0);
-    } else
-      _GD_DoSeek(D, E, enc_out, 0, GD_FILE_WRITE | GD_FILE_TEMP);
-  }
-
-  if (D->error) {
-    free(new_filebase);
+  /* Allocate streaming buffer */
+  buf_samples = GD_BUFFER_SIZE / E->e->u.raw.size;
+  buf = _GD_Malloc(D, GD_BUFFER_SIZE);
+  if (buf == NULL) {
+    _GD_ReleaseDir(D, tmp_dirfd);
+    rmdir(tmp_path);
+    free(tmp_path);
     dreturn("%i", -1);
     return -1;
   }
 
-  if ((buffer = _GD_Malloc(D, GD_BUFFER_SIZE)) == NULL) {
-    free(new_filebase);
-    dreturn("%i", -1);
-    return -1;
-  }
+  saved_subenc = E->e->u.raw.file[0].subenc;
 
-  /* Now copy the old file to the new file */
-  for (;;) {
-    nread = (*enc_in->read)(E->e->u.raw.file, buffer, E->EN(raw,data_type),
-        ns);
+  /* Start reading at the later of the old BOF and the new BOF.
+   * Data before the new frame offset is truncated (not carried over). */
+  new_bof = new_frame_offset * E->EN(raw,spf);
+  if (new_bof > bof)
+    bof = new_bof;
 
-    if (nread < 0) {
-      _GD_SetEncIOError(D, GD_E_IO_READ, E->e->u.raw.file + 0);
+  /* Determine whether the target encoding is OOP.  OOP encodings (gzip,
+   * bzip2, lzma, FLAC) can't write incrementally to compressed format, so
+   * we write raw and encode as a post-pass.  Non-OOP encodings (raw, zstd,
+   * text, SIE) are written directly through the target encoder. */
+  oop = (_GD_ef[subencoding].flags & GD_EF_OOP) ? 1 : 0;
+  write_enc = oop ? &_GD_ef[GD_ENC_RAW] : &_GD_ef[subencoding];
+  swap = _GD_CheckByteSex(E->EN(raw,data_type), new_byte_sex, 0, 0, NULL);
+
+  /* Local file handle for the write side -- completely independent of
+   * E->e->u.raw.file[], which is used only by the read path. */
+  memset(&target_file, 0, sizeof(target_file));
+  target_file.D = D;
+  target_file.subenc = oop ? GD_ENC_RAW : subencoding;
+  target_file.idata = -1;
+  target_open = 0;
+
+  /* Stream: read via normal path (handles encoding resolution), write to
+   * tmp_dirfd via local file handle and direct encoding calls. */
+  for (pos = bof; pos < eof_samples; pos += (off64_t)nread) {
+    n = (size_t)(eof_samples - pos);
+    if (n > buf_samples)
+      n = buf_samples;
+
+    /* Read from source */
+    nread = (ssize_t)_GD_DoField(D, E, 0, pos, n, E->EN(raw,data_type), buf);
+    if (nread <= 0 || D->error)
       break;
+
+    /* Close source so it doesn't hold the fd */
+    _GD_FiniRawIO(D, E, frag, GD_FINIRAW_KEEP);
+
+    /* Byte-swap for target layout.  ECOR encodings need the framework to
+     * fix byte order; SWAP encodings (FLAC) handle it internally.  For
+     * OOP targets we write raw, so always apply ECOR correction. */
+    if (_GD_ef[subencoding].flags & GD_EF_ECOR)
+      _GD_FixEndianness(buf, (size_t)nread, E->EN(raw,data_type), 0,
+          new_byte_sex);
+
+    /* Open target file on first write */
+    if (!target_open) {
+      if ((*write_enc->name)(D, NULL, &target_file, new_filebase, 0, 0) ||
+          (*write_enc->open)(tmp_dirfd, &target_file, E->EN(raw,data_type),
+            swap, GD_FILE_WRITE))
+      {
+        _GD_SetError(D, GD_E_IO, GD_E_IO_OPEN, new_filebase, 0, NULL);
+        break;
+      }
+      target_open = 1;
     }
 
-    if (nread == 0)
-      break;
-
-    /* swap endianness, if required */
-    _GD_FixEndianness(buffer, nread, E->EN(raw,data_type),
-        D->fragment[E->fragment_index].byte_sex, byte_sex);
-
-    nwrote = _GD_WriteOut(E, enc_out, buffer, E->EN(raw,data_type), nread, 1);
-
-    if (nwrote < nread) {
-      _GD_SetEncIOError(D, GD_E_IO_WRITE, E->e->u.raw.file + 1);
+    /* Seek and write */
+    target_pos = pos - new_frame_offset * E->EN(raw,spf);
+    (*write_enc->seek)(&target_file, target_pos, E->EN(raw,data_type),
+        GD_FILE_WRITE);
+    if ((*write_enc->write)(&target_file, buf, E->EN(raw,data_type),
+          (size_t)nread) < nread)
+    {
+      _GD_SetError(D, GD_E_IO, GD_E_IO_WRITE, new_filebase, 0, NULL);
       break;
     }
   }
 
-  free(buffer);
+  /* Close the write-side file */
+  if (target_open)
+    (*write_enc->close)(&target_file);
 
+  free(buf);
 
-  if (finalise) {
-    /* Finalise the conversion: on error delete the temporary file, otherwise
-     * copy it over top of the new one. */
-    if (D->error) {
-      /* An error occurred, delete the temporary file (the old
-       * file can stay open) */
-      _GD_FiniRawIO(D, E, new_fragment, GD_FINIRAW_CLOTEMP
-          | GD_FINIRAW_DISCARD);
-    } else {
-      struct gd_raw_file_ temp;
-      memcpy(&temp, E->e->u.raw.file, sizeof(temp));
+  /* For OOP targets, encode the raw file we just wrote: read raw, write
+   * through encoder, rename for OOP, delete raw. */
+  if (!D->error && oop && target_open && subencoding != GD_ENC_RAW) {
+    struct gd_raw_file_ enc_file;
+    char *final_name;
+    off64_t raw_nsamples;
+    ssize_t nr, nw;
+    size_t enc_buflen;
+    void *enc_buf;
 
-      /* discard the old file */
-      _GD_FiniRawIO(D, E, E->fragment_index, GD_FINIRAW_DISCARD);
+    /* Read back the raw file */
+    raw_nsamples = (*_GD_ef[GD_ENC_RAW].size)(tmp_dirfd, &target_file,
+        E->EN(raw,data_type), 0);
 
-      E->e->u.raw.file[0].name = NULL;
-      E->e->u.raw.file[0].subenc = subencoding;
-
-      if ((*_GD_ef[E->e->u.raw.file[0].subenc].name)(D,
-            (const char*)D->fragment[E->fragment_index].enc_data,
-            E->e->u.raw.file, new_filebase, 0, 0))
-      {
-        E->e->u.raw.file[0].name = temp.name;
-        E->e->u.raw.file[0].subenc = temp.subenc;
-      } else if (_GD_FiniRawIO(D, E, new_fragment, GD_FINIRAW_KEEP |
-            GD_FINIRAW_CLOTEMP))
-      {
-        E->e->u.raw.file[0].name = temp.name;
-        E->e->u.raw.file[0].subenc = temp.subenc;
-      } else if ((subencoding != temp.subenc || strcmp(E->e->u.raw.filebase,
-              new_filebase) || D->fragment[new_fragment].dirfd !=
-            D->fragment[E->fragment_index].dirfd) && (*enc_in->unlink)(
-              D->fragment[E->fragment_index].dirfd, &temp))
-      {
-        _GD_SetError(D, GD_E_IO, GD_E_IO_UNLINK, temp.name, 0, NULL);
-        E->e->u.raw.file[0].name = temp.name;
-        E->e->u.raw.file[0].subenc = temp.subenc;
+    if (raw_nsamples > 0) {
+      enc_buflen = (size_t)raw_nsamples * E->e->u.raw.size;
+      enc_buf = malloc(enc_buflen);
+      if (enc_buf == NULL) {
+        _GD_SetError(D, GD_E_ALLOC, 0, NULL, 0, NULL);
       } else {
-        free(temp.name);
-        free(E->e->u.raw.filebase);
-        E->e->u.raw.filebase = new_filebase;
+        /* Reopen raw file for reading */
+        target_file.idata = -1;
+        if ((*_GD_ef[GD_ENC_RAW].open)(tmp_dirfd, &target_file,
+              E->EN(raw,data_type), 0, GD_FILE_READ) == 0)
+        {
+          (*_GD_ef[GD_ENC_RAW].seek)(&target_file, 0, E->EN(raw,data_type),
+              GD_FILE_READ);
+          nr = (*_GD_ef[GD_ENC_RAW].read)(&target_file, enc_buf,
+              E->EN(raw,data_type), (size_t)raw_nsamples);
+          (*_GD_ef[GD_ENC_RAW].close)(&target_file);
+
+          if (nr >= raw_nsamples) {
+            /* Write through the target encoder */
+            memset(&enc_file, 0, sizeof(enc_file));
+            enc_file.D = D;
+            enc_file.subenc = subencoding;
+            enc_file.idata = -1;
+
+            /* Get final encoded filename */
+            if (!(*_GD_ef[subencoding].name)(D, NULL, &enc_file,
+                  new_filebase, 0, 0))
+            {
+              final_name = enc_file.name;
+              enc_file.name = NULL;
+
+              /* OOP: open as temp, write, close, rename */
+              if (!(*_GD_ef[subencoding].name)(D, NULL, &enc_file,
+                    new_filebase, 1, 0) &&
+                  !(*_GD_ef[subencoding].open)(tmp_dirfd, &enc_file,
+                    E->EN(raw,data_type), swap,
+                    GD_FILE_WRITE | GD_FILE_TEMP))
+              {
+                (*_GD_ef[subencoding].seek)(&enc_file, 0,
+                    E->EN(raw,data_type), GD_FILE_WRITE);
+                nw = (*_GD_ef[subencoding].write)(&enc_file, enc_buf,
+                    E->EN(raw,data_type), (size_t)nr);
+                (*_GD_ef[subencoding].close)(&enc_file);
+
+                if (nw >= nr) {
+                  gd_RenameAt(D, tmp_dirfd, enc_file.name, tmp_dirfd,
+                      final_name);
+
+                  /* Delete the raw file */
+                  gd_UnlinkAt(D, tmp_dirfd, target_file.name, 0);
+                } else {
+                  _GD_SetError(D, GD_E_IO, GD_E_IO_WRITE, new_filebase,
+                      0, NULL);
+                }
+              }
+              free(enc_file.name);
+              free(final_name);
+            }
+          }
+        }
+        free(enc_buf);
       }
     }
-  } else {
-    free(new_filebase);
-
-    /* Close both files */
-    _GD_FiniRawIO(D, E, E->fragment_index, GD_FINIRAW_DEFER);
-    _GD_FiniRawIO(D, E, new_fragment, GD_FINIRAW_DEFER | GD_FINIRAW_CLOTEMP);
   }
 
+  free(target_file.name);
+  target_file.name = NULL;
+
   if (D->error) {
+    E->e->u.raw.file[0].subenc = saved_subenc;
+    _GD_CleanupTempDir(D, tmp_dirfd, tmp_path, new_filebase);
+    free(tmp_path);
     dreturn("%i", -1);
     return -1;
   }
+
+  /* Commit: delete old data */
+  memset(&new_file, 0, sizeof(new_file));
+  new_file.D = D;
+  new_file.idata = -1;
+  new_file.subenc = saved_subenc;
+  if (!(*_GD_ef[saved_subenc].name)(D,
+        (const char *)D->fragment[frag].enc_data, &new_file,
+        E->e->u.raw.filebase, 0, 0))
+  {
+    (*_GD_ef[saved_subenc].unlink)(src_dirfd, &new_file);
+    free(new_file.name);
+  }
+
+  /* Move new data from temp dir to destination */
+  memset(&new_file, 0, sizeof(new_file));
+  new_file.D = D;
+  new_file.idata = -1;
+  new_file.subenc = subencoding;
+  if ((*_GD_ef[subencoding].name)(D, NULL, &new_file, new_filebase, 0, 0))
+  {
+    _GD_ReleaseDir(D, tmp_dirfd);
+    free(tmp_path);
+    _GD_ResetRawIO(E);
+    dreturn("%i", -1);
+    return -1;
+  }
+  if (gd_RenameAt(D, tmp_dirfd, new_file.name, dst_dirfd, new_file.name)) {
+    _GD_SetError(D, GD_E_IO, GD_E_IO_RENAME, new_file.name, 0, NULL);
+    free(new_file.name);
+    _GD_ReleaseDir(D, tmp_dirfd);
+    free(tmp_path);
+    _GD_ResetRawIO(E);
+    dreturn("%i", -1);
+    return -1;
+  }
+  free(new_file.name);
+
+  _GD_ReleaseDir(D, tmp_dirfd);
+  rmdir(tmp_path);
+  free(tmp_path);
+  _GD_ResetRawIO(E);
 
   dreturn("%i", 0);
   return 0;
 }
+
 
 int _GD_StrCmpNull(const char *s1, const char *s2)
 {
@@ -338,9 +472,9 @@ static int _GD_Move(DIRFILE *D, gd_entry_t *E, int new_fragment, unsigned flags)
   /* Compose the field's new name */
 
   /* remove the old affixes */
-  new_filebase = _GD_StripCode(D, E->fragment_index, E->field, GD_CO_NSALL 
+  new_filebase = _GD_StripCode(D, E->fragment_index, E->field, GD_CO_NSALL
       | GD_CO_ASSERT);
-  
+
   if (!new_filebase) /* Alloc error */
     GD_RETURN_ERROR(D);
 
@@ -378,10 +512,10 @@ static int _GD_Move(DIRFILE *D, gd_entry_t *E, int new_fragment, unsigned flags)
        _GD_StrCmpNull(D->fragment[E->fragment_index].sname,
          D->fragment[new_fragment].sname)))
   {
-    if (_GD_MogrifyFile(D, E, D->fragment[new_fragment].encoding,
+    if (_GD_TransformField(D, E, D->fragment[new_fragment].encoding,
           D->fragment[new_fragment].byte_sex,
-          D->fragment[new_fragment].frame_offset, 1, new_fragment,
-          new_filebase))
+          D->fragment[new_fragment].frame_offset,
+          new_fragment, new_filebase))
     {
       _GD_CleanUpRename(rdat, 1);
       GD_RETURN_ERROR(D);
@@ -431,7 +565,7 @@ int gd_move(DIRFILE *D, const char *field_code, int new_fragment,
     GD_SET_RETURN_ERROR(D, GD_E_BAD_FIELD_TYPE, GD_E_FIELD_BAD, NULL, 0,
         "INDEX");
 
-  if (new_fragment < 0 || new_fragment >= D->n_fragment) 
+  if (new_fragment < 0 || new_fragment >= D->n_fragment)
     GD_SET_RETURN_ERROR(D, GD_E_BAD_INDEX, 0, NULL, new_fragment, NULL);
 
   if (E->fragment_index == new_fragment) {

@@ -1088,6 +1088,8 @@ struct gd_private_entry_ {
 #define GD_N_SUBENCODINGS 13
 
 /* the last record of the _GD_ef array is always the unknown encoding */
+/* subencoding indices into the _GD_ef array */
+#define GD_ENC_RAW 0
 #define GD_ENC_UNKNOWN (GD_N_SUBENCODINGS - 1)
 
 /* Internal gd_entry_t flags */
@@ -1332,6 +1334,7 @@ int _GD_StrError(int errnum, char *buf, size_t buflen);
 
 char *_GD_MakeFullPathOnly(const DIRFILE *D, int dirfd, const char *name);
 int _GD_MakeTempFile(const DIRFILE*, int, char*);
+int _GD_MakeTempDir(const DIRFILE*, int, char*);
 
 #ifdef USE_MODULES
 #ifdef __cplusplus
@@ -1434,8 +1437,8 @@ int _GD_ListEntry(const gd_entry_t*, int, int, int, int, int, gd_entype_t);
 char *_GD_MakeFullPath(DIRFILE *restrict, int, const char *restrict, int);
 void *_GD_Malloc(DIRFILE *D, size_t size) __attribute_malloc__;
 int _GD_MissingFramework(int encoding, unsigned int funcs);
-int _GD_MogrifyFile(DIRFILE *restrict, gd_entry_t *restrict, unsigned long int,
-    unsigned long int, off64_t, int, int, char *restrict);
+int _GD_TransformField(DIRFILE*, gd_entry_t*, unsigned long, unsigned long,
+    off64_t, int, const char*);
 gd_type_t _GD_NativeType(DIRFILE *restrict, gd_entry_t *restrict, int);
 char *_GD_NormaliseNamespace(DIRFILE *restrict, const char *restrict,
     size_t *restrict) __attribute_malloc__;

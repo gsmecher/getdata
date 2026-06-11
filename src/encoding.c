@@ -855,7 +855,7 @@ int _GD_GenericName(DIRFILE *restrict D,
 static void _GD_RecodeFragment(DIRFILE* D, unsigned long encoding, int fragment,
     int move)
 {
-  unsigned int i, n_raw = 0;
+  unsigned int i;
 
   dtrace("%p, %lx, %i, %i", D, encoding, fragment, move);
 
@@ -868,75 +868,15 @@ static void _GD_RecodeFragment(DIRFILE* D, unsigned long encoding, int fragment,
   }
 
   if (move && encoding != D->fragment[fragment].encoding) {
-    gd_entry_t **raw_entry = _GD_Malloc(D, sizeof(*raw_entry) * D->n_entries);
-
-    if (raw_entry == NULL) {
-      dreturnvoid();
-      return;
-    }
-
-    /* Because it may fail, the move must occur out-of-place and then be copied
-     * back over the affected files once success is assured */
     for (i = 0; i < D->n_entries; ++i)
       if (D->entry[i]->fragment_index == fragment &&
           D->entry[i]->field_type == GD_RAW_ENTRY)
       {
-        if (!_GD_Supports(D, D->entry[i], GD_EF_UNLINK))
-          continue;
-
-        /* add this raw field to the list */
-        raw_entry[n_raw++] = D->entry[i];
-
-        if (_GD_MogrifyFile(D, D->entry[i], encoding,
-              D->fragment[D->entry[i]->fragment_index].byte_sex,
-              D->fragment[D->entry[i]->fragment_index].frame_offset, 0, -1,
-              NULL))
+        if (_GD_TransformField(D, D->entry[i], encoding,
+              D->fragment[fragment].byte_sex,
+              D->fragment[fragment].frame_offset, fragment, NULL))
           break;
       }
-
-    /* If successful, move the temporary file over the old file, otherwise
-     * remove the temporary files */
-    if (D->error) {
-      for (i = 0; i < n_raw; ++i)
-        _GD_FiniRawIO(D, raw_entry[i], fragment, GD_FINIRAW_DISCARD |
-            GD_FINIRAW_CLOTEMP);
-    } else
-      for (i = 0; i < n_raw; ++i) {
-        struct gd_raw_file_ temp;
-        memcpy(&temp, raw_entry[i]->e->u.raw.file, sizeof(temp));
-
-        raw_entry[i]->e->u.raw.file[0].name = NULL;
-        raw_entry[i]->e->u.raw.file[0].subenc =
-          raw_entry[i]->e->u.raw.file[1].subenc;
-
-        /* discard the old file */
-        _GD_FiniRawIO(D, raw_entry[i], fragment, GD_FINIRAW_DISCARD);
-
-        if ((*_GD_ef[temp.subenc].name)(D,
-              (const char*)D->fragment[raw_entry[i]->fragment_index].enc_data,
-              raw_entry[i]->e->u.raw.file, raw_entry[i]->e->u.raw.filebase, 0,
-              0))
-        {
-          raw_entry[i]->e->u.raw.file[0].name = temp.name;
-          raw_entry[i]->e->u.raw.file[0].subenc = temp.subenc;
-        } else if (_GD_FiniRawIO(D, raw_entry[i], fragment,
-              GD_FINIRAW_KEEP | GD_FINIRAW_CLOTEMP))
-        {
-          raw_entry[i]->e->u.raw.file[0].name = temp.name;
-          raw_entry[i]->e->u.raw.file[0].subenc = temp.subenc;
-        } else if ((*_GD_ef[temp.subenc].unlink)(D->fragment[fragment].dirfd,
-              &temp))
-        {
-          _GD_SetError(D, GD_E_UNCLEAN_DB, 0,
-              D->fragment[D->entry[i]->fragment_index].cname, 0, NULL);
-          D->flags |= GD_INVALID;
-          raw_entry[i]->e->u.raw.file[0].name = temp.name;
-          raw_entry[i]->e->u.raw.file[0].subenc = temp.subenc;
-        } else
-          free(temp.name);
-      }
-
-    free(raw_entry);
 
     if (D->error) {
       dreturnvoid();
@@ -947,15 +887,10 @@ static void _GD_RecodeFragment(DIRFILE* D, unsigned long encoding, int fragment,
       if (D->entry[i]->fragment_index == fragment &&
           D->entry[i]->field_type == GD_RAW_ENTRY)
       {
-        /* close the old file */
         _GD_FiniRawIO(D, D->entry[i], fragment, GD_FINIRAW_KEEP);
-
-        /* reset encoding subscheme. */
-        D->entry[i]->e->u.raw.file[0].subenc = GD_ENC_UNKNOWN;
-
-        /* delete name */
         free(D->entry[i]->e->u.raw.file[0].name);
         D->entry[i]->e->u.raw.file[0].name = NULL;
+        D->entry[i]->e->u.raw.file[0].subenc = GD_ENC_UNKNOWN;
       }
   }
 
@@ -1114,6 +1049,39 @@ int _GD_MakeTempFile(const DIRFILE *D gd_unused_d, int dirfd, char *tmpl)
 
   dreturn("%i", fd);
   return fd;
+}
+
+/* Like _GD_MakeTempFile, but creates a temporary directory.  Uses mktemp +
+ * mkdir in a retry loop rather than mkdtemp, which is not universally
+ * available (e.g. macOS under strict C99). */
+int _GD_MakeTempDir(const DIRFILE *D gd_unused_d, int dirfd, char *tmpl)
+{
+  int ret;
+  char *tmp = strdup(tmpl);
+
+  dtrace("%p, %i, \"%s\"", D, dirfd, tmpl);
+
+  if (!tmp) {
+    dreturn("%i", -1);
+    return -1;
+  }
+
+  do {
+    strcpy(tmpl, tmp);
+    mktemp(tmpl);
+    if (tmpl[0] == 0) {
+      free(tmp);
+      dreturn("%i", -1);
+      return -1;
+    }
+
+    ret = gd_MkdirAt(D, dirfd, tmpl, 0777);
+  } while (ret && errno == EEXIST);
+
+  free(tmp);
+
+  dreturn("%i", ret);
+  return ret;
 }
 
 int _GD_GenericUnlink(int dirfd, struct gd_raw_file_* file)

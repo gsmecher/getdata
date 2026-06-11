@@ -23,7 +23,7 @@
 static void _GD_ByteSwapFragment(DIRFILE* D, unsigned long byte_sex,
     int fragment, int move)
 {
-  unsigned int i, n_raw = 0;
+  unsigned int i;
 
   dtrace("%p, %lx, %i, %i", D, (unsigned long)byte_sex, fragment, move);
 
@@ -44,53 +44,15 @@ static void _GD_ByteSwapFragment(DIRFILE* D, unsigned long byte_sex,
   }
 
   if (move && byte_sex != D->fragment[fragment].byte_sex) {
-    gd_entry_t **raw_entry = (gd_entry_t **)_GD_Malloc(D, sizeof(gd_entry_t*) *
-        D->n_entries);
-
-    if (raw_entry == NULL) {
-      dreturnvoid();
-      return;
-    }
-
-    /* Because it may fail, the move must occur out-of-place and then be copied
-     * back over the affected files once success is assured */
     for (i = 0; i < D->n_entries; ++i)
       if (D->entry[i]->fragment_index == fragment &&
           D->entry[i]->field_type == GD_RAW_ENTRY)
       {
-        /* determine encoding scheme */
-        if (!_GD_Supports(D, D->entry[i], 0))
-          break;
-
-        /* if the field's data type is one byte long, and no in-framework
-         * byte-swapping is performed, do nothing */
-        if (D->entry[i]->e->u.raw.size == 1 &&
-            !(_GD_ef[D->entry[i]->e->u.raw.file[0].subenc].flags & GD_EF_SWAP))
-          continue;
-
-        /* add this raw field to the list */
-        raw_entry[n_raw++] = D->entry[i];
-
-        if (_GD_MogrifyFile(D, D->entry[i],
-              D->fragment[D->entry[i]->fragment_index].encoding, byte_sex,
-              D->fragment[D->entry[i]->fragment_index].frame_offset, 0, -1,
-              NULL))
+        if (_GD_TransformField(D, D->entry[i],
+              D->fragment[fragment].encoding, byte_sex,
+              D->fragment[fragment].frame_offset, fragment, NULL))
           break;
       }
-
-    /* If successful, move the temporary file over the old file, otherwise
-     * remove the temporary files */
-    if (D->error) {
-      for (i = 0; i < n_raw; ++i)
-        _GD_FiniRawIO(D, raw_entry[i], fragment, GD_FINIRAW_DISCARD |
-            GD_FINIRAW_CLOTEMP);
-    } else {
-      for (i = 0; i < n_raw; ++i)
-        _GD_FiniRawIO(D, raw_entry[i], fragment, GD_FINIRAW_KEEP |
-            GD_FINIRAW_CLOTEMP);
-    }
-
-    free(raw_entry);
 
     if (D->error) {
       dreturnvoid();

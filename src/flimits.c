@@ -23,7 +23,7 @@
 static void _GD_ShiftFragment(DIRFILE* D, off64_t offset, int fragment,
     int move)
 {
-  unsigned int i, n_raw = 0;
+  unsigned int i;
 
   dtrace("%p, %" PRId64 ", %i, %i", D, (int64_t)offset, fragment, move);
 
@@ -36,46 +36,15 @@ static void _GD_ShiftFragment(DIRFILE* D, off64_t offset, int fragment,
   }
 
   if (move && offset != D->fragment[fragment].frame_offset) {
-    gd_entry_t **raw_entry = _GD_Malloc(D, sizeof(*raw_entry) * D->n_entries);
-
-    if (raw_entry == NULL) {
-      dreturnvoid();
-      return;
-    }
-
-    /* Because it may fail, the move must occur out-of-place and then be copied
-     * back over the affected files once success is assured */
     for (i = 0; i < D->n_entries; ++i)
       if (D->entry[i]->fragment_index == fragment &&
           D->entry[i]->field_type == GD_RAW_ENTRY)
       {
-        /* determine encoding scheme */
-        if (!_GD_Supports(D, D->entry[i], 0))
-          break;
-
-        /* add this raw field to the list */
-        raw_entry[n_raw++] = D->entry[i];
-
-        if (_GD_MogrifyFile(D, D->entry[i],
-              D->fragment[D->entry[i]->fragment_index].encoding,
-              D->fragment[D->entry[i]->fragment_index].byte_sex, offset, 0, -1,
-              NULL))
+        if (_GD_TransformField(D, D->entry[i],
+              D->fragment[fragment].encoding,
+              D->fragment[fragment].byte_sex, offset, fragment, NULL))
           break;
       }
-
-    /* If successful, move the temporary file over the old file, otherwise
-     * remove the temporary files */
-    if (D->error) {
-      for (i = 0; i < n_raw; ++i)
-        _GD_FiniRawIO(D, raw_entry[i], fragment, GD_FINIRAW_DISCARD |
-            GD_FINIRAW_CLOTEMP);
-    } else {
-      for (i = 0; i < n_raw; ++i)
-        _GD_FiniRawIO(D, raw_entry[i], fragment, GD_FINIRAW_KEEP |
-            GD_FINIRAW_CLOTEMP);
-    }
-
-    free(raw_entry);
 
     if (D->error) {
       dreturnvoid();
