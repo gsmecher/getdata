@@ -32,6 +32,7 @@ jobs:
             python: '3.12'
             build: 'cp*-manylinux_x86_64'
             prefix: /usr
+            manylinux_image: quay.io/pypa/manylinux_2_34_x86_64
 
           - os: windows-latest
             python: '3.12'
@@ -87,6 +88,7 @@ jobs:
             pip install delvewheel "scikit-build-core>=0.5" "numpy>=2.0"
           CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
             delvewheel repair --add-path %VCPKG_INSTALLATION_ROOT%\installed\x64-windows-static-md\bin -vv -w {dest_dir} {wheel}
+          CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.manylinux_image || 'manylinux2014' }}
           CIBW_BUILD_VERBOSITY: 1
           CIBW_TEST_COMMAND_LINUX: >
             python {project}/bindings/python/test/test_wheel.py
